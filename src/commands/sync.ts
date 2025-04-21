@@ -7,7 +7,12 @@ import {
   Task,
   createGitHubIssue,
   createLocalTaskFromIssue,
+  createMilestone,
+  createProject,
   fetchGitHubIssues,
+  fetchIssueProjectInfo,
+  fetchMilestones,
+  fetchProjects,
   updateGitHubIssue,
   updateLocalTaskFromIssue,
   updateTaskWithGitHubInfo,
@@ -67,13 +72,30 @@ async function showTasksTable() {
       return;
     }
 
+    // Buscar informações de projeto do GitHub para cada task
+    const tasksWithProjects = await Promise.all(
+      tasks.map(async (task: Task) => {
+        if (task.github_issue_number) {
+          try {
+            const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
+            if (projectInfo) {
+              task.project = projectInfo;
+            }
+          } catch (error) {
+            // Silenciar erro
+          }
+        }
+        return task;
+      })
+    );
+
     const table = new Table({
       head: [chalk.cyan("Título"), chalk.cyan("Status"), chalk.cyan("Projeto"), chalk.cyan("Sprint")],
       wordWrap: true,
       wrapOnWordBoundary: true,
     });
 
-    tasks.forEach((task: Task) => {
+    tasksWithProjects.forEach((task: Task) => {
       const issuePrefix = task.github_issue_number ? `${task.github_issue_number} - ` : "";
       table.push([
         chalk.green(`${issuePrefix}${task.title}`),
@@ -103,10 +125,71 @@ async function pushToGitHub() {
 
     console.log(chalk.blue(`🔄 Sincronizando ${files.length} tasks locais com GitHub...`));
 
+    // Buscar milestones e projetos existentes para verificação
+    const milestones = await fetchMilestones();
+    const projects = await fetchProjects();
+
     // Processar cada arquivo de task
     for (const file of files) {
       const taskPath = path.join(taskDir, file);
       const task = (await fs.readJSON(taskPath)) as Task;
+
+      // Verificar milestone antes de sincronizar
+      if (task.milestone && !milestones.has(task.milestone.toLowerCase())) {
+        const { createNewMilestone } = await inquirer.prompt([
+          {
+            type: "confirm",
+            name: "createNewMilestone",
+            message: `A milestone "${task.milestone}" não existe no GitHub. Deseja criá-la?`,
+            default: true,
+          },
+        ]);
+
+        if (createNewMilestone) {
+          const milestoneId = await createMilestone(task.milestone);
+          if (!milestoneId) {
+            console.log(`⚠️ Não foi possível criar a milestone. A issue será criada sem milestone.`);
+            task.milestone = "";
+            // Atualizar o arquivo local
+            await fs.writeJSON(taskPath, task, { spaces: 2 });
+          }
+        } else {
+          console.log(`⚠️ A issue será criada sem milestone.`);
+          task.milestone = "";
+          // Atualizar o arquivo local
+          await fs.writeJSON(taskPath, task, { spaces: 2 });
+        }
+      }
+
+      // Verificar projeto antes de sincronizar
+      if (task.project && !projects.has(task.project)) {
+        const { createNewProject } = await inquirer.prompt([
+          {
+            type: "confirm",
+            name: "createNewProject",
+            message: `O projeto "${task.project}" não existe no GitHub. Deseja criá-lo?`,
+            default: true,
+          },
+        ]);
+
+        if (createNewProject) {
+          const projectId = await createProject(task.project);
+          if (!projectId) {
+            console.log(`⚠️ Não foi possível criar o projeto. A issue será criada sem projeto.`);
+            task.project = "";
+            // Atualizar o arquivo local
+            await fs.writeJSON(taskPath, task, { spaces: 2 });
+          } else {
+            // Atualizar o mapa de projetos para incluir o novo projeto
+            projects.set(task.project, projectId);
+          }
+        } else {
+          console.log(`⚠️ A issue será criada sem projeto.`);
+          task.project = "";
+          // Atualizar o arquivo local
+          await fs.writeJSON(taskPath, task, { spaces: 2 });
+        }
+      }
 
       // Verificar se a task já está sincronizada
       if (task.synced && task.github_issue_number) {

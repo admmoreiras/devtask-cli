@@ -347,9 +347,6 @@ export async function createGitHubIssue(task: Task): Promise<number | null> {
 
     if (task.milestone) {
       milestoneNumber = milestones.get(task.milestone.toLowerCase());
-      if (!milestoneNumber) {
-        console.log(`⚠️ Milestone "${task.milestone}" não encontrado no GitHub. Criando issue sem milestone.`);
-      }
     }
 
     // Preparar labels para status
@@ -392,14 +389,12 @@ export async function createGitHubIssue(task: Task): Promise<number | null> {
         if (added) {
           console.log(`✅ Issue adicionada ao projeto "${task.project}"`);
         }
-      } else {
-        console.log(`⚠️ Projeto "${task.project}" não encontrado no GitHub.`);
       }
     }
 
     return response.data.number;
   } catch (error) {
-    console.error(`❌ Erro ao criar issue para "${task.title}":`, error);
+    console.error("❌ Erro ao criar issue no GitHub:", error);
     return null;
   }
 }
@@ -696,6 +691,92 @@ export async function fetchIssueProjectInfo(issueNumber: number): Promise<string
   }
 }
 
+// Função para criar uma milestone no GitHub
+export async function createMilestone(title: string, description: string = ""): Promise<number | null> {
+  try {
+    const response = await octokit.rest.issues.createMilestone({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      title: title,
+      description: description,
+      state: "open",
+    });
+
+    if (response.data.number) {
+      console.log(`✅ Milestone "${title}" criada com sucesso (ID: ${response.data.number})`);
+      return response.data.number;
+    }
+    return null;
+  } catch (error) {
+    console.error(`❌ Erro ao criar milestone "${title}":`, error);
+    return null;
+  }
+}
+
+// Função para criar um projeto no GitHub (ProjectV2)
+export async function createProject(title: string, description: string = ""): Promise<string | null> {
+  try {
+    // Vamos obter primeiro o ID do usuário ou organização
+    let ownerId: string | null = null;
+    const isUserAccount = await isUser();
+
+    if (isUserAccount) {
+      // Obter ID do usuário
+      const userQuery = `
+        query {
+          user(login: "${GITHUB_OWNER}") {
+            id
+          }
+        }
+      `;
+      const userResponse: any = await octokit.graphql(userQuery);
+      ownerId = userResponse.user.id;
+    } else {
+      // Obter ID da organização
+      const orgQuery = `
+        query {
+          organization(login: "${GITHUB_OWNER}") {
+            id
+          }
+        }
+      `;
+      const orgResponse: any = await octokit.graphql(orgQuery);
+      ownerId = orgResponse.organization.id;
+    }
+
+    if (!ownerId) {
+      console.error(`❌ Não foi possível obter o ID do proprietário "${GITHUB_OWNER}"`);
+      return null;
+    }
+
+    // Criar o projeto usando o ID do proprietário
+    const createQuery = `
+      mutation {
+        createProjectV2(input: {
+          ownerId: "${ownerId}",
+          title: "${title}"
+        }) {
+          projectV2 {
+            id
+          }
+        }
+      }
+    `;
+
+    const response: any = await octokit.graphql(createQuery);
+
+    if (response?.createProjectV2?.projectV2?.id) {
+      const projectId = response.createProjectV2.projectV2.id;
+      console.log(`✅ Projeto "${title}" criado com sucesso`);
+      return projectId;
+    }
+    return null;
+  } catch (error) {
+    console.error(`❌ Erro ao criar projeto "${title}":`, error);
+    return null;
+  }
+}
+
 // Exportação padrão com todas as funções
 export default {
   listMilestones,
@@ -710,4 +791,6 @@ export default {
   createLocalTaskFromIssue,
   updateGitHubIssue,
   fetchIssueProjectInfo,
+  createMilestone,
+  createProject,
 };
