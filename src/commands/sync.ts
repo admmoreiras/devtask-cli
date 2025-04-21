@@ -9,6 +9,8 @@ import {
   createLocalTaskFromIssue,
   createMilestone,
   createProject,
+  extractStatusFromIssue,
+  fetchGitHubIssue,
   fetchGitHubIssues,
   fetchIssueProjectInfo,
   fetchMilestones,
@@ -92,21 +94,42 @@ async function showTasksTable() {
       return;
     }
 
-    // Buscar informações de projeto do GitHub para cada task
-    const tasksWithProjects = await Promise.all(
+    // Buscar informações atualizadas para cada task
+    const updatedTasks = await Promise.all(
       tasks.map(async (task: Task) => {
         if (task.github_issue_number) {
           try {
-            const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
-            if (projectInfo) {
-              task.project = projectInfo;
-            } else {
-              // Definir como string vazia se não encontrar projeto
-              task.project = "";
+            // Buscar issue para obter status atual do projeto
+            const issue = await fetchGitHubIssue(task.github_issue_number);
+            if (issue) {
+              // Atualizar estado da issue (open/closed)
+              task.state = issue.state;
+
+              // Buscar projeto atualizado
+              const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
+              if (projectInfo) {
+                task.project = projectInfo;
+              } else {
+                task.project = "";
+              }
+
+              // Atualizar status com informações do projeto
+              const statusFromProject = await extractStatusFromIssue(issue);
+              if (statusFromProject) {
+                task.status = statusFromProject;
+              }
+
+              // Salvar a task atualizada no arquivo JSON local
+              const filename = `#${task.github_issue_number}-${task.id}-${task.title
+                .toLowerCase()
+                .replace(/\s+/g, "-")
+                .replace(/[^\w-]/g, "")}.json`;
+
+              await fs.writeJSON(path.join(".task/issues", filename), task, { spaces: 2 });
+              console.log(`✅ Arquivo JSON atualizado para task #${task.github_issue_number}`);
             }
           } catch (error) {
-            // Silenciar erro e garantir que project seja string vazia
-            task.project = "";
+            console.error(`Erro ao atualizar task #${task.github_issue_number}:`, error);
           }
         }
         return task;
@@ -125,12 +148,10 @@ async function showTasksTable() {
       wrapOnWordBoundary: true,
     });
 
-    tasksWithProjects.forEach((task: Task) => {
+    updatedTasks.forEach((task: Task) => {
       const issuePrefix = task.github_issue_number ? `#${task.github_issue_number} - ` : "";
-      // Remover '@' do nome do projeto se existir e garantir N/A se vazio
       const projectName = task.project ? (task.project.startsWith("@") ? task.project.substring(1) : task.project) : "";
 
-      // Determinar o status do GitHub
       let githubStatus = "N/A";
       if (task.state) {
         githubStatus = task.state === "open" ? "Aberta" : "Fechada";

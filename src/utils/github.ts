@@ -521,7 +521,7 @@ export async function extractStatusFromIssue(issue: any): Promise<string> {
     return "done";
   }
 
-  // Primeiro, tentar obter o status do projeto
+  // Buscar status exclusivamente do projeto
   try {
     if (issue.number) {
       // Buscar informações do projeto e status
@@ -531,31 +531,10 @@ export async function extractStatusFromIssue(issue: any): Promise<string> {
       }
     }
   } catch (error) {
-    // Silenciar erro e continuar com outras estratégias
+    // Silenciar erro
   }
 
-  // Segundo, verificar no corpo da issue
-  if (issue.body && issue.body.includes("**Status:**")) {
-    const statusMatch = issue.body.match(/\*\*Status:\*\*\s*(.*?)(\n|$)/);
-    if (statusMatch && statusMatch[1]) {
-      const status = statusMatch[1].trim();
-      // Se o status for válido (não vazio)
-      if (status && status !== "Sim" && status !== "Não") {
-        return status;
-      }
-    }
-  }
-
-  // Terceiro, verificar labels (método antigo)
-  if (issue.labels && issue.labels.length > 0) {
-    // Procurar por um label de status
-    const statusLabel = issue.labels.find((label: any) => label.name.startsWith("status:"));
-    if (statusLabel) {
-      return statusLabel.name.replace("status:", "");
-    }
-  }
-
-  // Default para issues abertas sem status encontrado
+  // Default para issues abertas sem status encontrado no projeto
   return "todo";
 }
 
