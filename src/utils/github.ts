@@ -32,6 +32,7 @@ export interface Task {
   status: string;
   synced?: boolean;
   github_issue_number?: number;
+  lastSyncAt?: string; // Data e hora da última sincronização com GitHub
 }
 
 // Interfaces para resposta GraphQL
@@ -458,6 +459,7 @@ export async function updateTaskWithGitHubInfo(task: Task, issueNumber: number):
     // Atualizar propriedades
     task.synced = true;
     task.github_issue_number = issueNumber;
+    task.lastSyncAt = new Date().toISOString(); // Adicionar timestamp de sincronização
 
     // Gerar novo nome de arquivo com o número da issue
     const taskPath = path.join(".task/issues", getTaskFilename(task));
@@ -535,6 +537,25 @@ export async function updateLocalTaskFromIssue(task: Task, issue: any): Promise<
       }
     }
 
+    // Extrair timestamp da última atualização da issue
+    let lastSyncAt: string;
+    if (issue.updated_at) {
+      // Usar o timestamp fornecido pelo GitHub
+      lastSyncAt = new Date(issue.updated_at).toISOString();
+    } else {
+      // Fallback para o timestamp atual
+      lastSyncAt = new Date().toISOString();
+    }
+
+    // Extrair informações de projeto se existirem na descrição
+    let projectFromDesc = "";
+    if (issue.body && issue.body.includes("**Projeto:**")) {
+      const projectMatch = issue.body.match(/\*\*Projeto:\*\*\s*(.*?)$/m);
+      if (projectMatch && projectMatch[1]) {
+        projectFromDesc = projectMatch[1].trim();
+      }
+    }
+
     // Atualizar propriedades
     task.title = issue.title;
     task.description = issue.body ? issue.body.split("---")[0].trim() : "";
@@ -542,6 +563,22 @@ export async function updateLocalTaskFromIssue(task: Task, issue: any): Promise<
     task.milestone = issue.milestone?.title || task.milestone;
     task.synced = true;
     task.github_issue_number = issue.number;
+    task.lastSyncAt = lastSyncAt;
+
+    // Se encontramos um projeto na descrição, usar ele
+    if (projectFromDesc) {
+      task.project = projectFromDesc;
+    }
+
+    // Buscar informações de projeto vinculado à issue (superior ao descrito no corpo)
+    try {
+      const projectInfo = await fetchIssueProjectInfo(issue.number);
+      if (projectInfo) {
+        task.project = projectInfo;
+      }
+    } catch (error) {
+      // Silenciar erro
+    }
 
     // Remover o arquivo antigo se existir
     try {
@@ -597,15 +634,37 @@ export async function createLocalTaskFromIssue(issue: any): Promise<void> {
       }
     }
 
+    // Extrair timestamp da última atualização da issue
+    let lastSyncAt: string;
+    if (issue.updated_at) {
+      // Usar o timestamp fornecido pelo GitHub
+      lastSyncAt = new Date(issue.updated_at).toISOString();
+    } else {
+      // Fallback para o timestamp atual
+      lastSyncAt = new Date().toISOString();
+    }
+
+    // Buscar informações de projeto vinculado à issue
+    let projectName = "";
+    try {
+      const projectInfo = await fetchIssueProjectInfo(issue.number);
+      if (projectInfo) {
+        projectName = projectInfo;
+      }
+    } catch (error) {
+      // Silenciar erro
+    }
+
     const task: Task = {
       id,
       title: issue.title,
       description: issue.body ? issue.body.split("---")[0].trim() : "", // Remover metadados do corpo
       milestone: issue.milestone?.title || "",
-      project: "", // GitHub não fornece projeto diretamente
+      project: projectName, // Usar o projeto vinculado à issue
       status: status,
       synced: true,
       github_issue_number: issue.number,
+      lastSyncAt: lastSyncAt, // Adicionar timestamp da última sincronização
     };
 
     // Usar novo formato de nome com número da issue
@@ -644,6 +703,14 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
       console.log(`Status mudou de "${currentStatus}" para "${task.status}"`);
     }
 
+    // Verificar se há mudanças no projeto
+    const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
+    const projectChanged = projectInfo !== task.project;
+
+    if (projectChanged) {
+      console.log(`Projeto mudou de "${projectInfo || "Nenhum"}" para "${task.project || "Nenhum"}"`);
+    }
+
     // Preparar labels - manter labels existentes exceto as de status
     const existingLabels = currentIssue.labels
       .filter((label: any) => !label.name.startsWith("status:"))
@@ -659,11 +726,16 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
     // Adicionar informação de status e synced no corpo da issue
     let taskBody = task.description || "";
 
+    // Obter data/hora atual no formato ISO do GitHub
+    const now = new Date().toISOString();
+    task.lastSyncAt = now;
+
     // Adicionar metadados ao final da descrição
     taskBody += `\n\n---\n`;
     taskBody += `**Status:** ${task.status}\n`;
     taskBody += `**Sincronizado:** ${task.synced ? "Sim" : "Não"}\n`;
     taskBody += `**ID Local:** ${task.id}\n`;
+    taskBody += `**Última Sincronização:** ${now}\n`;
 
     // Atualizar a issue
     await octokit.rest.issues.update({
@@ -675,6 +747,36 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
       state: task.status === "done" ? "closed" : "open",
       labels: labels,
     });
+
+    // Se o projeto foi alterado, vincular a issue ao novo projeto
+    if (projectChanged && task.project) {
+      const projects = await fetchProjects();
+
+      // Normalizar o nome do projeto para várias possibilidades (com/sem @)
+      const projectName = task.project;
+      const projectNameWithAt = projectName.startsWith("@") ? projectName : `@${projectName}`;
+      const projectNameWithoutAt = projectName.startsWith("@") ? projectName.substring(1) : projectName;
+
+      // Procurar projeto pelo nome exato ou variações
+      let projectId =
+        projects.get(projectName) || projects.get(projectNameWithAt) || projects.get(projectNameWithoutAt);
+
+      if (projectId) {
+        console.log(`Vinculando issue #${task.github_issue_number} ao projeto "${task.project}"`);
+        const added = await addIssueToProject(currentIssue.node_id, projectId);
+        if (added) {
+          console.log(`✅ Issue adicionada ao projeto "${task.project}"`);
+        } else {
+          console.error(`❌ Não foi possível adicionar a issue ao projeto "${task.project}"`);
+        }
+      } else {
+        console.error(`❌ Projeto "${task.project}" não encontrado no GitHub`);
+      }
+    }
+
+    // Salvar a task atualizada com o novo timestamp
+    const taskPath = path.join(".task/issues", getTaskFilename(task));
+    await fs.writeJSON(taskPath, task, { spaces: 2 });
 
     console.log(`✅ Issue #${task.github_issue_number} atualizada com status: ${task.status}`);
     return true;

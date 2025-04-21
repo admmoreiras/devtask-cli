@@ -100,7 +100,15 @@ export async function createTask() {
     .replace(/\s+/g, "-")
     .replace(/[^\w-]/g, "");
   const id = Date.now();
-  const task = { id, title, description, milestone: finalMilestone, project: finalProject, status: "todo" };
+  const task = {
+    id,
+    title,
+    description,
+    milestone: finalMilestone,
+    project: finalProject,
+    status: "todo",
+    lastSyncAt: new Date().toISOString(),
+  };
 
   await saveJson(path.join(".task/issues", `${id}-${slug}.json`), task);
 
