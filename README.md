@@ -32,8 +32,13 @@ GITHUB_REPO=nome_do_repositorio
 Para criar um token do GitHub, acesse:
 
 1. GitHub > Settings > Developer Settings > Personal Access Tokens
-2. Generate new token (classic)
-3. Selecione pelo menos os escopos: `repo`
+2. **IMPORTANTE**: Use "Generate new token (classic)" e NÃO "Fine-grained tokens"
+3. Selecione os seguintes escopos:
+   - `repo` (todas permissões)
+   - `project` (necessário para integração com GitHub Projects)
+
+> **Nota**: A API do GitHub para projetos tem limitações com tokens refinados (fine-grained).
+> Para total compatibilidade, especialmente com projetos, use tokens clássicos.
 
 ## Comandos
 
@@ -60,6 +65,14 @@ O comando `sync` oferece três opções:
 - **Local → GitHub**: Envia suas tasks locais para o GitHub como issues
 - **GitHub → Local**: Baixa issues do GitHub como tasks locais
 - **Ambos**: Sincronização bidirecional
+
+### Informações do GitHub
+
+```bash
+devtask info
+```
+
+Lista milestones e projetos disponíveis no GitHub para facilitar a sincronização.
 
 ## Estrutura
 
