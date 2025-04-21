@@ -33,6 +33,7 @@ export interface Task {
   synced?: boolean;
   github_issue_number?: number;
   lastSyncAt?: string; // Data e hora da última sincronização com GitHub
+  state?: string; // Estado da issue no GitHub (open/closed)
 }
 
 // Interfaces para resposta GraphQL
@@ -412,21 +413,35 @@ export async function createGitHubIssue(task: Task): Promise<number | null> {
   }
 }
 
-// Função para buscar issues do GitHub
-export async function fetchGitHubIssues(): Promise<any[]> {
+/**
+ * Busca issues do GitHub para um repositório específico
+ */
+export const fetchGitHubIssues = async (): Promise<any[]> => {
   try {
+    // Verificar se as variáveis de ambiente estão definidas
+    if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_OWNER || !process.env.GITHUB_REPO) {
+      throw new Error("Variáveis de ambiente GITHUB_TOKEN, GITHUB_OWNER e GITHUB_REPO são necessárias.");
+    }
+
+    const owner = process.env.GITHUB_OWNER;
+    const repo = process.env.GITHUB_REPO;
+
+    const octokit = new Octokit({
+      auth: process.env.GITHUB_TOKEN,
+    });
+
     const response = await octokit.rest.issues.listForRepo({
-      owner: GITHUB_OWNER,
-      repo: GITHUB_REPO,
-      state: "all",
+      owner,
+      repo,
+      per_page: 100,
     });
 
     return response.data;
   } catch (error) {
-    console.error("❌ Erro ao buscar issues do GitHub:", error);
+    console.error("Erro ao buscar issues do GitHub:", error);
     return [];
   }
-}
+};
 
 // Função para gerar nome de arquivo da task
 function getTaskFilename(task: Task): string {
@@ -564,6 +579,7 @@ export async function updateLocalTaskFromIssue(task: Task, issue: any): Promise<
     task.synced = true;
     task.github_issue_number = issue.number;
     task.lastSyncAt = lastSyncAt;
+    task.state = issue.state; // Armazenar o estado da issue (open/closed)
 
     // Se encontramos um projeto na descrição, usar ele
     if (projectFromDesc) {
@@ -665,6 +681,7 @@ export async function createLocalTaskFromIssue(issue: any): Promise<void> {
       synced: true,
       github_issue_number: issue.number,
       lastSyncAt: lastSyncAt, // Adicionar timestamp da última sincronização
+      state: issue.state, // Armazenar o estado da issue (open/closed)
     };
 
     // Usar novo formato de nome com número da issue

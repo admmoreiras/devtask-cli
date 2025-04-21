@@ -1,7 +1,7 @@
 {
   "name": "devtask-cli",
   "version": "1.0.0",
-  "description": "",
+  "description": "CLI para gerenciamento de tarefas de desenvolvimento com integração ao GitHub",
   "main": "dist/index.js",
   "bin": {
     "devtask": "dist/index.js"
@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "dev": "ts-node src/index.ts",
+    "dev": "node --loader=ts-node/esm src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

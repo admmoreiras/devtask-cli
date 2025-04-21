@@ -90,7 +90,13 @@ async function showTasksTable() {
     );
 
     const table = new Table({
-      head: [chalk.cyan("Título"), chalk.cyan("Status"), chalk.cyan("Projeto"), chalk.cyan("Sprint")],
+      head: [
+        chalk.cyan("Título"),
+        chalk.cyan("Status"),
+        chalk.cyan("Status GitHub"),
+        chalk.cyan("Projeto"),
+        chalk.cyan("Sprint"),
+      ],
       wordWrap: true,
       wrapOnWordBoundary: true,
     });
@@ -100,9 +106,16 @@ async function showTasksTable() {
       // Remover '@' do nome do projeto se existir
       const projectName = task.project && task.project.startsWith("@") ? task.project.substring(1) : task.project;
 
+      // Determinar o status do GitHub
+      let githubStatus = "N/A";
+      if (task.state) {
+        githubStatus = task.state === "open" ? "Aberta" : "Fechada";
+      }
+
       table.push([
         chalk.green(`${issuePrefix}${task.title}`),
         task.status || "N/A",
+        githubStatus,
         projectName || "N/A",
         task.milestone || "N/A",
       ]);
@@ -306,7 +319,7 @@ async function pullFromGitHub() {
     console.log(chalk.blue("🔄 Buscando issues do GitHub..."));
 
     // Buscar todas as issues
-    const issues = await fetchGitHubIssues();
+    const issues = (await fetchGitHubIssues()) || [];
 
     if (issues.length === 0) {
       console.log(chalk.yellow("⚠️ Nenhuma issue encontrada no GitHub."));
