@@ -348,13 +348,30 @@ export async function createGitHubIssue(task: Task): Promise<number | null> {
       }
     }
 
+    // Preparar labels para status
+    const labels = [];
+    if (task.status) {
+      labels.push(`status:${task.status}`);
+    }
+
+    // Adicionar informação de status e synced no corpo da issue
+    let taskBody = task.description || "";
+
+    // Adicionar metadados ao final da descrição
+    taskBody += `\n\n---\n`;
+    taskBody += `**Status:** ${task.status}\n`;
+    taskBody += `**Sincronizado:** ${task.synced ? "Sim" : "Não"}\n`;
+    taskBody += `**ID Local:** ${task.id}\n`;
+
     // Criar a issue
     const response = await octokit.rest.issues.create({
       owner: GITHUB_OWNER,
       repo: GITHUB_REPO,
       title: task.title,
-      body: task.description,
+      body: taskBody,
       milestone: milestoneNumber,
+      labels: labels,
+      state: task.status === "done" ? "closed" : "open",
     });
 
     console.log(`✅ Issue criada no GitHub: #${response.data.number}`);
@@ -421,40 +438,182 @@ export async function updateTaskWithGitHubInfo(task: Task, issueNumber: number):
   }
 }
 
+// Função para buscar uma issue específica no GitHub
+export async function fetchGitHubIssue(issueNumber: number): Promise<any | null> {
+  try {
+    const response = await octokit.rest.issues.get({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      issue_number: issueNumber,
+    });
+
+    return response.data;
+  } catch (error) {
+    console.error(`❌ Erro ao buscar issue #${issueNumber} do GitHub:`, error);
+    return null;
+  }
+}
+
+// Função para atualizar task local a partir de uma issue do GitHub
+export async function updateLocalTaskFromIssue(task: Task, issue: any): Promise<boolean> {
+  try {
+    // Extrair status dos labels ou estado da issue
+    let status = task.status; // Manter o status atual por padrão
+
+    if (issue.state === "closed") {
+      status = "done";
+    } else if (issue.labels && issue.labels.length > 0) {
+      // Procurar por um label de status
+      const statusLabel = issue.labels.find((label: any) => label.name.startsWith("status:"));
+
+      if (statusLabel) {
+        status = statusLabel.name.replace("status:", "");
+      } else {
+        status = "todo"; // Estado padrão para issues abertas sem label de status
+      }
+    }
+
+    // Atualizar propriedades
+    task.title = issue.title;
+    task.description = issue.body ? issue.body.split("---")[0].trim() : "";
+    task.status = status;
+    task.milestone = issue.milestone?.title || task.milestone;
+    task.synced = true;
+
+    // Salvar as alterações
+    const slug = task.title
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^\w-]/g, "");
+
+    const taskPath = path.join(".task/issues", `${task.id}-${slug}.json`);
+    await fs.writeJSON(taskPath, task, { spaces: 2 });
+
+    console.log(`✅ Task local "${task.title}" atualizada a partir da issue #${issue.number}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Erro ao atualizar task local a partir da issue #${issue.number}:`, error);
+    return false;
+  }
+}
+
 // Função para criar task local a partir de issue do GitHub
 export async function createLocalTaskFromIssue(issue: any): Promise<void> {
   try {
+    // Verificar se já existe uma task com esse número de issue
+    const existingTasks = await fs.readdir(path.join(".task/issues"));
+    const taskFiles = await Promise.all(existingTasks.map((file) => fs.readJSON(path.join(".task/issues", file))));
+
+    const existingTask = taskFiles.find((t) => (t as Task).github_issue_number === issue.number) as Task | undefined;
+
+    if (existingTask) {
+      // Atualizar a task existente em vez de criar uma nova
+      await updateLocalTaskFromIssue(existingTask, issue);
+      return;
+    }
+
+    // Criar nova task se não existir
     const id = Date.now();
     const slug = issue.title
       .toLowerCase()
       .replace(/\s+/g, "-")
       .replace(/[^\w-]/g, "");
 
+    // Extrair status do label ou do estado da issue
+    let status = "todo";
+    if (issue.state === "closed") {
+      status = "done";
+    } else if (issue.labels && issue.labels.length > 0) {
+      // Procurar por um label de status
+      const statusLabel = issue.labels.find((label: any) => label.name.startsWith("status:"));
+
+      if (statusLabel) {
+        status = statusLabel.name.replace("status:", "");
+      }
+    }
+
     const task: Task = {
       id,
       title: issue.title,
-      description: issue.body || "",
+      description: issue.body ? issue.body.split("---")[0].trim() : "", // Remover metadados do corpo
       milestone: issue.milestone?.title || "",
       project: "", // GitHub não fornece projeto diretamente
-      status: issue.state === "open" ? "todo" : "done",
+      status: status,
       synced: true,
       github_issue_number: issue.number,
     };
 
     const taskPath = path.join(".task/issues", `${id}-${slug}.json`);
-
-    // Verificar se já existe uma task com esse número de issue
-    const existingTasks = await fs.readdir(path.join(".task/issues"));
-    const taskFiles = await Promise.all(existingTasks.map((file) => fs.readJSON(path.join(".task/issues", file))));
-
-    const taskExists = taskFiles.some((t) => (t as Task).github_issue_number === issue.number);
-
-    if (!taskExists) {
-      await fs.ensureDir(path.join(".task/issues"));
-      await fs.writeJSON(taskPath, task, { spaces: 2 });
-      console.log(`✅ Task local criada a partir da issue #${issue.number}`);
-    }
+    await fs.ensureDir(path.join(".task/issues"));
+    await fs.writeJSON(taskPath, task, { spaces: 2 });
+    console.log(`✅ Task local criada a partir da issue #${issue.number}`);
   } catch (error) {
     console.error(`❌ Erro ao criar task local a partir da issue #${issue.number}:`, error);
+  }
+}
+
+// Função para atualizar um issue no GitHub com status de task local
+export async function updateGitHubIssue(task: Task): Promise<boolean> {
+  try {
+    if (!task.github_issue_number) {
+      console.error(`❌ Task "${task.title}" não tem número de issue associado.`);
+      return false;
+    }
+
+    // Buscar a issue atual para comparar
+    const currentIssue = await fetchGitHubIssue(task.github_issue_number);
+    if (!currentIssue) {
+      console.error(`❌ Issue #${task.github_issue_number} não encontrada.`);
+      return false;
+    }
+
+    // Verificar se há mudanças no status
+    const currentStatus =
+      currentIssue.state === "closed"
+        ? "done"
+        : currentIssue.labels?.find((l: any) => l.name.startsWith("status:"))?.name.replace("status:", "") || "todo";
+
+    const statusChanged = currentStatus !== task.status;
+    if (statusChanged) {
+      console.log(`Status mudou de "${currentStatus}" para "${task.status}"`);
+    }
+
+    // Preparar labels - manter labels existentes exceto as de status
+    const existingLabels = currentIssue.labels
+      .filter((label: any) => !label.name.startsWith("status:"))
+      .map((label: any) => label.name);
+
+    const labels = [...existingLabels];
+
+    // Adicionar label de status
+    if (task.status) {
+      labels.push(`status:${task.status}`);
+    }
+
+    // Adicionar informação de status e synced no corpo da issue
+    let taskBody = task.description || "";
+
+    // Adicionar metadados ao final da descrição
+    taskBody += `\n\n---\n`;
+    taskBody += `**Status:** ${task.status}\n`;
+    taskBody += `**Sincronizado:** ${task.synced ? "Sim" : "Não"}\n`;
+    taskBody += `**ID Local:** ${task.id}\n`;
+
+    // Atualizar a issue
+    await octokit.rest.issues.update({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      issue_number: task.github_issue_number,
+      title: task.title,
+      body: taskBody,
+      state: task.status === "done" ? "closed" : "open",
+      labels: labels,
+    });
+
+    console.log(`✅ Issue #${task.github_issue_number} atualizada com status: ${task.status}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Erro ao atualizar issue #${task.github_issue_number}:`, error);
+    return false;
   }
 }

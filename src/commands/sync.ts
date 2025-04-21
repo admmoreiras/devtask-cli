@@ -7,6 +7,8 @@ import {
   createGitHubIssue,
   createLocalTaskFromIssue,
   fetchGitHubIssues,
+  updateGitHubIssue,
+  updateLocalTaskFromIssue,
   updateTaskWithGitHubInfo,
 } from "../utils/github.js";
 
@@ -64,9 +66,15 @@ async function pushToGitHub() {
       const taskPath = path.join(taskDir, file);
       const task = (await fs.readJSON(taskPath)) as Task;
 
-      // Pular tasks já sincronizadas
+      // Verificar se a task já está sincronizada
       if (task.synced && task.github_issue_number) {
-        console.log(chalk.gray(`- Task "${task.title}" já sincronizada (Issue #${task.github_issue_number})`));
+        console.log(chalk.blue(`- Atualizando task "${task.title}" (Issue #${task.github_issue_number})...`));
+
+        // Atualizar a issue existente
+        const updated = await updateGitHubIssue(task);
+        if (updated) {
+          console.log(chalk.green(`  ✅ Issue #${task.github_issue_number} atualizada com sucesso`));
+        }
         continue;
       }
 
@@ -100,11 +108,40 @@ async function pullFromGitHub() {
 
     console.log(chalk.blue(`Encontradas ${issues.length} issues no GitHub.`));
 
+    // Buscar tarefas locais existentes para comparar
+    const taskDir = path.join(".task/issues");
+    await fs.ensureDir(taskDir);
+    const files = await fs.readdir(taskDir);
+    const tasks = await Promise.all(files.map((file) => fs.readJSON(path.join(taskDir, file))));
+
+    // Mapear número da issue para a task local correspondente
+    const taskMap = new Map<number, Task>();
+    tasks.forEach((task: Task) => {
+      if (task.github_issue_number) {
+        taskMap.set(task.github_issue_number, task);
+      }
+    });
+
+    let updated = 0;
+    let created = 0;
+
     // Processar cada issue
     for (const issue of issues) {
-      console.log(chalk.blue(`- Processando issue #${issue.number}: ${issue.title}`));
-      await createLocalTaskFromIssue(issue);
+      if (taskMap.has(issue.number)) {
+        // Atualizar task existente
+        console.log(chalk.blue(`- Atualizando task para issue #${issue.number}: ${issue.title}`));
+        const task = taskMap.get(issue.number)!;
+        await updateLocalTaskFromIssue(task, issue);
+        updated++;
+      } else {
+        // Criar nova task
+        console.log(chalk.blue(`- Criando task para issue #${issue.number}: ${issue.title}`));
+        await createLocalTaskFromIssue(issue);
+        created++;
+      }
     }
+
+    console.log(chalk.green(`✅ Sincronização concluída: ${updated} tasks atualizadas, ${created} tasks criadas.`));
   } catch (error) {
     console.error(chalk.red("❌ Erro ao buscar issues do GitHub:"), error);
   }
