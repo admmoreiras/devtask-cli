@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import Table from "cli-table3";
 import path from "path";
+import { fetchIssueProjectInfo } from "../utils/github.js";
 import { readAllFromDir } from "../utils/storage.js";
 
 interface Task {
@@ -20,13 +21,26 @@ export async function listTasks() {
     return;
   }
 
+  // Buscar informações de projeto do GitHub para cada task
+  const tasksWithProjects = await Promise.all(
+    tasks.map(async (task: Task) => {
+      if (task.github_issue_number) {
+        const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
+        if (projectInfo) {
+          task.project = projectInfo;
+        }
+      }
+      return task;
+    })
+  );
+
   const table = new Table({
     head: [chalk.cyan("Título"), chalk.cyan("Status"), chalk.cyan("Projeto"), chalk.cyan("Sprint")],
     wordWrap: true,
     wrapOnWordBoundary: true,
   });
 
-  tasks.forEach((task: Task) => {
+  tasksWithProjects.forEach((task: Task) => {
     const issuePrefix = task.github_issue_number ? `${task.github_issue_number} - ` : "";
 
     table.push([chalk.green(`${issuePrefix}${task.title}`), task.status, task.project, task.milestone]);

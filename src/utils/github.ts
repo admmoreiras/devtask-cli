@@ -622,6 +622,80 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
   }
 }
 
+// Função para buscar informações de projeto de uma issue específica
+export async function fetchIssueProjectInfo(issueNumber: number): Promise<string | null> {
+  try {
+    // Primeiro, precisamos obter o ID do nó da issue para usar no GraphQL
+    const issue = await octokit.rest.issues.get({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      issue_number: issueNumber,
+    });
+
+    if (!issue || !issue.data || !issue.data.node_id) {
+      return null;
+    }
+
+    const issueNodeId = issue.data.node_id;
+
+    // Consulta GraphQL para buscar projetos vinculados à issue
+    const query = `
+      query {
+        node(id: "${issueNodeId}") {
+          ... on Issue {
+            title
+            projectItems(first: 10) {
+              nodes {
+                project {
+                  title
+                }
+              }
+            }
+            projectsV2(first: 10) {
+              nodes {
+                title
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    interface ProjectResponse {
+      node: {
+        projectItems?: {
+          nodes: Array<{
+            project: {
+              title: string;
+            };
+          }>;
+        };
+        projectsV2?: {
+          nodes: Array<{
+            title: string;
+          }>;
+        };
+      };
+    }
+
+    const response = await octokit.graphql<ProjectResponse>(query);
+
+    // Verificar se a issue está em algum projeto
+    if (response.node.projectItems && response.node.projectItems.nodes.length > 0) {
+      // Projetos clássicos
+      return response.node.projectItems.nodes[0].project.title;
+    } else if (response.node.projectsV2 && response.node.projectsV2.nodes.length > 0) {
+      // Projetos v2
+      return response.node.projectsV2.nodes[0].title;
+    }
+
+    return null;
+  } catch (error) {
+    console.error(`❌ Erro ao buscar projetos da issue #${issueNumber}:`, error);
+    return null;
+  }
+}
+
 // Exportação padrão com todas as funções
 export default {
   listMilestones,
@@ -635,4 +709,5 @@ export default {
   updateLocalTaskFromIssue,
   createLocalTaskFromIssue,
   updateGitHubIssue,
+  fetchIssueProjectInfo,
 };
