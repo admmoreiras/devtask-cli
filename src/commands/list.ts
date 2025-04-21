@@ -2,7 +2,13 @@ import chalk from "chalk";
 import Table from "cli-table3";
 import fs from "fs-extra";
 import * as path from "path";
-import { Task, fetchGitHubIssue, fetchGitHubIssues, fetchIssueProjectInfo } from "../utils/github.js";
+import {
+  Task,
+  extractStatusFromIssue,
+  fetchGitHubIssue,
+  fetchGitHubIssues,
+  fetchIssueProjectInfo,
+} from "../utils/github.js";
 
 interface GitHubIssue {
   number: number;
@@ -77,6 +83,12 @@ export const listTasks = async (): Promise<void> => {
               task.project = projectInfo;
             } else {
               task.project = "";
+            }
+
+            // Atualizar status com informações do projeto no GitHub
+            const statusFromProject = await extractStatusFromIssue(issue);
+            if (statusFromProject) {
+              task.status = statusFromProject;
             }
           }
         } catch (error) {

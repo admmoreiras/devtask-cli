@@ -57,6 +57,26 @@ export async function syncTasks() {
   }
 }
 
+// Função para colorir o status baseado no valor
+function getColoredStatus(status: string): string {
+  switch (status.toLowerCase()) {
+    case "todo":
+      return chalk.blue(status);
+    case "in progress":
+    case "em andamento":
+      return chalk.yellow(status);
+    case "done":
+    case "concluído":
+    case "concluido":
+      return chalk.green(status);
+    case "blocked":
+    case "bloqueado":
+      return chalk.red(status);
+    default:
+      return status;
+  }
+}
+
 // Função para mostrar tabela de tarefas
 async function showTasksTable() {
   try {
@@ -118,7 +138,7 @@ async function showTasksTable() {
 
       table.push([
         chalk.green(`${issuePrefix}${task.title}`),
-        task.status || "N/A",
+        getColoredStatus(task.status || "N/A"),
         githubStatus,
         projectName || "N/A",
         task.milestone || "N/A",

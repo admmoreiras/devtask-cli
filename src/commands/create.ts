@@ -1,6 +1,12 @@
 import inquirer from "inquirer";
 import path from "path";
-import { createMilestone, createProject, fetchMilestones, fetchProjects } from "../utils/github.js";
+import {
+  createMilestone,
+  createProject,
+  fetchMilestones,
+  fetchProjects,
+  fetchProjectStatusOptions,
+} from "../utils/github.js";
 import { saveJson } from "../utils/storage.js";
 
 export async function createTask() {
@@ -59,13 +65,15 @@ export async function createTask() {
 
   // Lidar com o caso de criar novo projeto
   let finalProject = "";
+  let projectId = null;
+
   if (projectChoice === "new_project") {
     const { newProjectName } = await inquirer.prompt([
       { type: "input", name: "newProjectName", message: "Nome do novo projeto:" },
     ]);
 
     if (newProjectName && newProjectName.trim() !== "") {
-      const projectId = await createProject(newProjectName);
+      projectId = await createProject(newProjectName);
       if (projectId) {
         finalProject = newProjectName;
       } else {
@@ -74,6 +82,7 @@ export async function createTask() {
     }
   } else {
     finalProject = projectChoice;
+    projectId = projects.get(projectChoice);
   }
 
   // Lidar com o caso de criar nova milestone
@@ -95,6 +104,31 @@ export async function createTask() {
     finalMilestone = milestoneChoice;
   }
 
+  // Obter opções de status do projeto
+  let statusChoices = ["todo", "in progress", "done", "blocked"];
+
+  if (projectId) {
+    try {
+      const projectStatusOptions = await fetchProjectStatusOptions(projectId);
+      if (projectStatusOptions && projectStatusOptions.length > 0) {
+        statusChoices = projectStatusOptions;
+      }
+    } catch (error) {
+      // Silenciar erro, usar opções padrão
+    }
+  }
+
+  // Perguntar qual o status inicial da task
+  const { status } = await inquirer.prompt([
+    {
+      type: "list",
+      name: "status",
+      message: "Status inicial da task:",
+      choices: statusChoices,
+      default: "todo",
+    },
+  ]);
+
   const slug = title
     .toLowerCase()
     .replace(/\s+/g, "-")
@@ -106,7 +140,7 @@ export async function createTask() {
     description,
     milestone: finalMilestone,
     project: finalProject,
-    status: "todo",
+    status,
     lastSyncAt: new Date().toISOString(),
   };
 

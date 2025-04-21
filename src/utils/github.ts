@@ -515,31 +515,145 @@ export async function fetchGitHubIssue(issueNumber: number): Promise<any | null>
  * @param issue Issue do GitHub
  * @returns Status extraído (done, todo, in progress, etc)
  */
-function extractStatusFromIssue(issue: any): string {
+export async function extractStatusFromIssue(issue: any): Promise<string> {
   // Se a issue estiver fechada, o status é sempre "done"
   if (issue.state === "closed") {
     return "done";
   }
 
-  // Verificar labels para status específico
+  // Primeiro, tentar obter o status do projeto
+  try {
+    if (issue.number) {
+      // Buscar informações do projeto e status
+      const projectStatus = await fetchProjectStatus(issue.number);
+      if (projectStatus) {
+        return projectStatus;
+      }
+    }
+  } catch (error) {
+    // Silenciar erro e continuar com outras estratégias
+  }
+
+  // Segundo, verificar no corpo da issue
+  if (issue.body && issue.body.includes("**Status:**")) {
+    const statusMatch = issue.body.match(/\*\*Status:\*\*\s*(.*?)(\n|$)/);
+    if (statusMatch && statusMatch[1]) {
+      const status = statusMatch[1].trim();
+      // Se o status for válido (não vazio)
+      if (status && status !== "Sim" && status !== "Não") {
+        return status;
+      }
+    }
+  }
+
+  // Terceiro, verificar labels (método antigo)
   if (issue.labels && issue.labels.length > 0) {
     // Procurar por um label de status
     const statusLabel = issue.labels.find((label: any) => label.name.startsWith("status:"));
-
     if (statusLabel) {
       return statusLabel.name.replace("status:", "");
     }
   }
 
-  // Default para issues abertas sem label específico
+  // Default para issues abertas sem status encontrado
   return "todo";
+}
+
+// Função para buscar o status de uma issue no projeto do GitHub
+async function fetchProjectStatus(issueNumber: number): Promise<string | null> {
+  try {
+    // Primeiro, obter o ID do nó da issue
+    const issue = await octokit.rest.issues.get({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      issue_number: issueNumber,
+    });
+
+    if (!issue || !issue.data || !issue.data.node_id) {
+      return null;
+    }
+
+    const issueNodeId = issue.data.node_id;
+
+    // Consulta GraphQL para buscar status no projeto
+    const query = `
+      query {
+        node(id: "${issueNodeId}") {
+          ... on Issue {
+            title
+            projectItems(first: 10) {
+              nodes {
+                fieldValues(first: 10) {
+                  nodes {
+                    ... on ProjectV2ItemFieldSingleSelectValue {
+                      name
+                      field {
+                        ... on ProjectV2SingleSelectField {
+                          name
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    interface ProjectStatusResponse {
+      node: {
+        projectItems?: {
+          nodes: Array<{
+            fieldValues: {
+              nodes: Array<{
+                name?: string;
+                field?: {
+                  name?: string;
+                };
+              }>;
+            };
+          }>;
+        };
+      };
+    }
+
+    const response = await octokit.graphql<ProjectStatusResponse>(query);
+
+    // Verificar se encontramos campos de status no projeto
+    if (response.node.projectItems && response.node.projectItems.nodes.length > 0) {
+      for (const projectItem of response.node.projectItems.nodes) {
+        if (projectItem.fieldValues && projectItem.fieldValues.nodes) {
+          for (const fieldValue of projectItem.fieldValues.nodes) {
+            // Verificar se é um campo de status
+            if (
+              fieldValue.field &&
+              fieldValue.name &&
+              fieldValue.field.name &&
+              (fieldValue.field.name === "Status" ||
+                fieldValue.field.name.toLowerCase() === "status" ||
+                fieldValue.field.name.toLowerCase().includes("status"))
+            ) {
+              return fieldValue.name.toLowerCase();
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error(`❌ Erro ao buscar status da issue #${issueNumber} no projeto:`, error);
+    return null;
+  }
 }
 
 // Função para atualizar task local a partir de uma issue do GitHub
 export async function updateLocalTaskFromIssue(task: Task, issue: any): Promise<boolean> {
   try {
     // Extrair status da issue usando a função auxiliar
-    const status = extractStatusFromIssue(issue);
+    const status = await extractStatusFromIssue(issue);
 
     // Primeiro remover arquivo antigo se ele existir
     const oldFilePath = path.join(
@@ -660,7 +774,7 @@ export async function createLocalTaskFromIssue(issue: any): Promise<void> {
       .replace(/[^\w-]/g, "");
 
     // Extrair o status da issue usando a função auxiliar
-    const status = extractStatusFromIssue(issue);
+    const status = await extractStatusFromIssue(issue);
 
     // Extrair timestamp da última atualização da issue
     let lastSyncAt: string;
@@ -725,11 +839,7 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
     }
 
     // Verificar se há mudanças no status
-    const currentStatus =
-      currentIssue.state === "closed"
-        ? "done"
-        : currentIssue.labels?.find((l: any) => l.name.startsWith("status:"))?.name.replace("status:", "") || "todo";
-
+    const currentStatus = await extractStatusFromIssue(currentIssue);
     const statusChanged = currentStatus !== task.status;
     if (statusChanged) {
       console.log(`Status mudou de "${currentStatus}" para "${task.status}"`);
@@ -952,7 +1062,26 @@ export async function createProject(title: string, description: string = ""): Pr
     // Se o título já tiver '@', vamos remover para padronizar
     const normalizedTitle = title.startsWith("@") ? title.substring(1) : title;
 
-    // Vamos obter primeiro o ID do usuário ou organização
+    // Primeiro, obter o ID do repositório para vincular depois
+    const repoQuery = `
+      query {
+        repository(owner: "${GITHUB_OWNER}", name: "${GITHUB_REPO}") {
+          id
+        }
+      }
+    `;
+
+    let repositoryId;
+    try {
+      const repoResponse: any = await octokit.graphql(repoQuery);
+      repositoryId = repoResponse.repository.id;
+      console.log(`✅ Repositório encontrado (ID: ${repositoryId})`);
+    } catch (error) {
+      console.error(`❌ Erro ao buscar ID do repositório:`, error);
+      // Continuar mesmo sem o ID do repositório
+    }
+
+    // Vamos obter o ID do usuário ou organização
     let ownerId: string | null = null;
     const isUserAccount = await isUser();
 
@@ -1005,6 +1134,30 @@ export async function createProject(title: string, description: string = ""): Pr
       const projectId = response.createProjectV2.projectV2.id;
       console.log(`✅ Projeto "${normalizedTitle}" criado com sucesso (ID: ${projectId})`);
 
+      // Vincular o projeto ao repositório se temos o ID do repositório
+      if (repositoryId) {
+        try {
+          const linkQuery = `
+            mutation {
+              linkProjectV2ToRepository(input: {
+                projectId: "${projectId}",
+                repositoryId: "${repositoryId}"
+              }) {
+                repository {
+                  name
+                }
+              }
+            }
+          `;
+
+          const linkResponse: any = await octokit.graphql(linkQuery);
+          console.log(`✅ Projeto vinculado ao repositório ${GITHUB_REPO}`);
+        } catch (error) {
+          console.error(`❌ Erro ao vincular projeto ao repositório:`, error);
+          // Continuar mesmo com o erro de vinculação
+        }
+      }
+
       // Buscar projetos novamente para atualizar o cache
       console.log(`🔄 Atualizando cache de projetos...`);
       const projects = await fetchProjects();
@@ -1014,6 +1167,74 @@ export async function createProject(title: string, description: string = ""): Pr
     return null;
   } catch (error) {
     console.error(`❌ Erro ao criar projeto "${title}":`, error);
+    return null;
+  }
+}
+
+/**
+ * Busca as opções de status disponíveis em um projeto
+ * @param projectId ID do projeto no GitHub
+ * @returns Lista de opções de status ou null se não encontrar
+ */
+export async function fetchProjectStatusOptions(projectId: string): Promise<string[] | null> {
+  try {
+    console.log(`\n🔍 Buscando opções de status do projeto...`);
+
+    // Consulta GraphQL para buscar campos de status do projeto
+    const query = `
+      query {
+        node(id: "${projectId}") {
+          ... on ProjectV2 {
+            fields(first: 20) {
+              nodes {
+                ... on ProjectV2SingleSelectField {
+                  name
+                  options {
+                    name
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    interface ProjectFieldsResponse {
+      node: {
+        fields?: {
+          nodes: Array<{
+            name?: string;
+            options?: Array<{
+              name: string;
+            }>;
+          }>;
+        };
+      };
+    }
+
+    const response = await octokit.graphql<ProjectFieldsResponse>(query);
+
+    // Buscar campos do tipo status
+    if (response.node.fields && response.node.fields.nodes) {
+      for (const field of response.node.fields.nodes) {
+        if (
+          field.name &&
+          field.options &&
+          (field.name === "Status" ||
+            field.name.toLowerCase() === "status" ||
+            field.name.toLowerCase().includes("status"))
+        ) {
+          // Extrair e retornar as opções de status
+          return field.options.map((option) => option.name.toLowerCase());
+        }
+      }
+    }
+
+    console.log(`❌ Nenhum campo de status encontrado no projeto`);
+    return null;
+  } catch (error) {
+    console.error(`❌ Erro ao buscar opções de status do projeto:`, error);
     return null;
   }
 }
@@ -1034,4 +1255,5 @@ export default {
   fetchIssueProjectInfo,
   createMilestone,
   createProject,
+  fetchProjectStatusOptions,
 };
