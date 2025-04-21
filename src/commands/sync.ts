@@ -126,16 +126,52 @@ async function pushToGitHub() {
       return;
     }
 
-    console.log(chalk.blue(`🔄 Sincronizando ${files.length} tasks locais com GitHub...`));
+    // Filtrar apenas os arquivos JSON
+    const jsonFiles = files.filter((file) => file.endsWith(".json"));
+    console.log(chalk.blue(`🔄 Encontradas ${jsonFiles.length} tasks locais`));
 
     // Buscar milestones e projetos existentes para verificação
     const milestones = await fetchMilestones();
     const projects = await fetchProjects();
 
+    // Variáveis para estatísticas
+    let totalTasksProcessed = 0;
+    let tasksSkipped = 0;
+    let tasksUpdated = 0;
+    let tasksCreated = 0;
+
     // Processar cada arquivo de task
-    for (const file of files) {
+    for (const file of jsonFiles) {
       const taskPath = path.join(taskDir, file);
+
+      // Obter informações do arquivo
+      const fileStats = await fs.stat(taskPath);
+      const fileModifiedTime = new Date(fileStats.mtime).getTime();
+
       const task = (await fs.readJSON(taskPath)) as Task;
+
+      // Verificar se a task já foi sincronizada antes
+      const taskSynced = task.synced && task.github_issue_number;
+
+      // Verificar se a task foi modificada desde a última sincronização
+      let modified = true; // Assume que foi modificada por padrão
+
+      if (task.lastSyncAt) {
+        const lastSyncTime = new Date(task.lastSyncAt).getTime();
+        // Se a data da última sincronização for mais recente que a data de modificação do arquivo,
+        // a task não foi modificada após a última sincronização
+        if (lastSyncTime >= fileModifiedTime) {
+          modified = false;
+        }
+      }
+
+      // Pular tasks já sincronizadas e não modificadas
+      if (taskSynced && !modified) {
+        console.log(chalk.gray(`- Pulando task "${task.title}" (não modificada desde a última sincronização)`));
+        tasksSkipped++;
+        totalTasksProcessed++;
+        continue;
+      }
 
       // Verificar milestone antes de sincronizar
       if (task.milestone && !milestones.has(task.milestone.toLowerCase())) {
@@ -173,11 +209,6 @@ async function pushToGitHub() {
 
         // Imprimir informações para depuração
         console.log(`\nVerificando projeto: "${projectName}"`);
-        console.log(`Variações: "${projectNameWithAt}", "${projectNameWithoutAt}"`);
-        console.log(`Projetos disponíveis no GitHub:`);
-        for (const [name, id] of projects.entries()) {
-          console.log(`  - "${name}"`);
-        }
 
         // Verificar se existe o projeto em qualquer um dos formatos (case insensitive)
         let projectExists = false;
@@ -240,20 +271,30 @@ async function pushToGitHub() {
         const updated = await updateGitHubIssue(task);
         if (updated) {
           console.log(chalk.green(`  ✅ Issue #${task.github_issue_number} atualizada com sucesso`));
+          tasksUpdated++;
         }
-        continue;
+      } else {
+        // Criar issue no GitHub
+        console.log(chalk.blue(`- Enviando nova task "${task.title}" para GitHub...`));
+        const issueNumber = await createGitHubIssue(task);
+
+        if (issueNumber) {
+          // Atualizar task local com informações do GitHub
+          await updateTaskWithGitHubInfo(task, issueNumber);
+          console.log(chalk.green(`  ✅ Task "${task.title}" sincronizada como Issue #${issueNumber}`));
+          tasksCreated++;
+        }
       }
 
-      // Criar issue no GitHub
-      console.log(chalk.blue(`- Enviando task "${task.title}" para GitHub...`));
-      const issueNumber = await createGitHubIssue(task);
-
-      if (issueNumber) {
-        // Atualizar task local com informações do GitHub
-        await updateTaskWithGitHubInfo(task, issueNumber);
-        console.log(chalk.green(`  ✅ Task "${task.title}" sincronizada como Issue #${issueNumber}`));
-      }
+      totalTasksProcessed++;
     }
+
+    // Exibir estatísticas
+    console.log(chalk.blue(`\n📊 Resumo da sincronização:`));
+    console.log(chalk.blue(`  - Tasks processadas: ${totalTasksProcessed}`));
+    console.log(chalk.blue(`  - Tasks ignoradas (não modificadas): ${tasksSkipped}`));
+    console.log(chalk.blue(`  - Tasks atualizadas: ${tasksUpdated}`));
+    console.log(chalk.blue(`  - Novas issues criadas: ${tasksCreated}`));
   } catch (error) {
     console.error(chalk.red("❌ Erro ao enviar tasks para GitHub:"), error);
   }

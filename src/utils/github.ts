@@ -711,6 +711,14 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
       console.log(`Projeto mudou de "${projectInfo || "Nenhum"}" para "${task.project || "Nenhum"}"`);
     }
 
+    // Verificar se há mudanças na milestone
+    const currentMilestone = currentIssue.milestone?.title || "";
+    const milestoneChanged = currentMilestone !== task.milestone;
+
+    if (milestoneChanged) {
+      console.log(`Milestone mudou de "${currentMilestone || "Nenhuma"}" para "${task.milestone || "Nenhuma"}"`);
+    }
+
     // Preparar labels - manter labels existentes exceto as de status
     const existingLabels = currentIssue.labels
       .filter((label: any) => !label.name.startsWith("status:"))
@@ -733,9 +741,28 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
     // Adicionar metadados ao final da descrição
     taskBody += `\n\n---\n`;
     taskBody += `**Status:** ${task.status}\n`;
+    taskBody += `**Projeto:** ${task.project || "Nenhum"}\n`;
+    taskBody += `**Milestone:** ${task.milestone || "Nenhuma"}\n`;
     taskBody += `**Sincronizado:** ${task.synced ? "Sim" : "Não"}\n`;
     taskBody += `**ID Local:** ${task.id}\n`;
     taskBody += `**Última Sincronização:** ${now}\n`;
+
+    // Buscar o ID da milestone se foi alterada
+    let milestoneNumber = undefined;
+    if (milestoneChanged && task.milestone) {
+      const milestones = await fetchMilestones();
+      milestoneNumber = milestones.get(task.milestone.toLowerCase());
+
+      if (!milestoneNumber) {
+        console.log(`⚠️ Milestone "${task.milestone}" não encontrada no GitHub, tentando criar...`);
+        milestoneNumber = await createMilestone(task.milestone);
+        if (!milestoneNumber) {
+          console.log(`❌ Não foi possível criar a milestone "${task.milestone}"`);
+        } else {
+          console.log(`✅ Milestone "${task.milestone}" criada com sucesso (ID: ${milestoneNumber})`);
+        }
+      }
+    }
 
     // Atualizar a issue
     await octokit.rest.issues.update({
@@ -746,6 +773,7 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
       body: taskBody,
       state: task.status === "done" ? "closed" : "open",
       labels: labels,
+      milestone: milestoneChanged ? milestoneNumber : undefined,
     });
 
     // Se o projeto foi alterado, vincular a issue ao novo projeto
@@ -778,7 +806,7 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
     const taskPath = path.join(".task/issues", getTaskFilename(task));
     await fs.writeJSON(taskPath, task, { spaces: 2 });
 
-    console.log(`✅ Issue #${task.github_issue_number} atualizada com status: ${task.status}`);
+    console.log(`✅ Issue #${task.github_issue_number} atualizada com sucesso`);
     return true;
   } catch (error) {
     console.error(`❌ Erro ao atualizar issue #${task.github_issue_number}:`, error);
