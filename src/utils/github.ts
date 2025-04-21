@@ -107,6 +107,10 @@ export async function fetchMilestones(): Promise<Map<string, number>> {
 // Função para listar milestones disponíveis
 export async function listMilestones(): Promise<void> {
   try {
+    console.log(`\nToken: ${GITHUB_TOKEN.substring(0, 5)}...`);
+    console.log(`Owner: ${GITHUB_OWNER}`);
+    console.log(`Repo: ${GITHUB_REPO}`);
+
     const response = await octokit.rest.issues.listMilestones({
       owner: GITHUB_OWNER,
       repo: GITHUB_REPO,
@@ -617,3 +621,18 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
     return false;
   }
 }
+
+// Exportação padrão com todas as funções
+export default {
+  listMilestones,
+  listProjects,
+  fetchMilestones,
+  fetchProjects,
+  createGitHubIssue,
+  fetchGitHubIssues,
+  updateTaskWithGitHubInfo,
+  fetchGitHubIssue,
+  updateLocalTaskFromIssue,
+  createLocalTaskFromIssue,
+  updateGitHubIssue,
+};
