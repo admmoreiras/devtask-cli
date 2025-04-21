@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import Table from "cli-table3";
 import fs from "fs-extra";
 import inquirer from "inquirer";
 import path from "path";
@@ -11,6 +12,7 @@ import {
   updateLocalTaskFromIssue,
   updateTaskWithGitHubInfo,
 } from "../utils/github.js";
+import { readAllFromDir } from "../utils/storage.js";
 
 // Função para sincronizar tarefas locais com GitHub
 export async function syncTasks() {
@@ -42,8 +44,48 @@ export async function syncTasks() {
     }
 
     console.log(chalk.green("✅ Sincronização concluída!"));
+
+    // Mostrar tabela atualizada após sincronização
+    await showTasksTable();
   } catch (error) {
     console.error(chalk.red("❌ Erro durante a sincronização:"), error);
+  }
+}
+
+// Função para mostrar tabela de tarefas
+async function showTasksTable() {
+  try {
+    console.log("\n📋 Processando dados para exibição de tarefas...");
+
+    // Pequena pausa para garantir que os arquivos foram salvos
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    const tasks = await readAllFromDir(path.join(".task/issues"));
+
+    if (!tasks.length) {
+      console.log("Nenhuma task encontrada.");
+      return;
+    }
+
+    const table = new Table({
+      head: [chalk.cyan("Título"), chalk.cyan("Status"), chalk.cyan("Projeto"), chalk.cyan("Sprint")],
+      wordWrap: true,
+      wrapOnWordBoundary: true,
+    });
+
+    tasks.forEach((task: Task) => {
+      const issuePrefix = task.github_issue_number ? `${task.github_issue_number} - ` : "";
+      table.push([
+        chalk.green(`${issuePrefix}${task.title}`),
+        task.status || "N/A",
+        task.project || "N/A",
+        task.milestone || "N/A",
+      ]);
+    });
+
+    console.log(table.toString());
+  } catch (error) {
+    console.error("Erro ao mostrar tabela:", error);
   }
 }
 
