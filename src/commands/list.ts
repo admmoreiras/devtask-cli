@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import Table from "cli-table3";
 import path from "path";
 import { readAllFromDir } from "../utils/storage.js";
 
@@ -9,6 +10,7 @@ interface Task {
   milestone: string;
   project: string;
   status: string;
+  github_issue_number?: number;
 }
 
 export async function listTasks() {
@@ -18,10 +20,17 @@ export async function listTasks() {
     return;
   }
 
-  tasks.forEach((task: Task) => {
-    console.log(`${chalk.green(task.title)} [${task.status}]`);
-    console.log(`🔗 Projeto: ${task.project} | 🧩 Sprint: ${task.milestone}`);
-    console.log(`📝 ${task.description}`);
-    console.log("---");
+  const table = new Table({
+    head: [chalk.cyan("Título"), chalk.cyan("Status"), chalk.cyan("Projeto"), chalk.cyan("Sprint")],
+    wordWrap: true,
+    wrapOnWordBoundary: true,
   });
+
+  tasks.forEach((task: Task) => {
+    const issuePrefix = task.github_issue_number ? `${task.github_issue_number} - ` : "";
+
+    table.push([chalk.green(`${issuePrefix}${task.title}`), task.status, task.project, task.milestone]);
+  });
+
+  console.log(table.toString());
 }
