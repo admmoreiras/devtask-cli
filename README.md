@@ -48,11 +48,25 @@ Para criar um token do GitHub, acesse:
 devtask create
 ```
 
+A criação de tasks agora oferece:
+
+- Seleção de projetos existentes a partir de uma lista
+- Seleção de milestones/sprints a partir de uma lista
+- Opção para criar novos projetos ou milestones caso não existam
+
 ### Listar todas as tasks
 
 ```bash
 devtask list
 ```
+
+Exibe uma tabela formatada com:
+
+- Número de issue do GitHub (com prefixo #)
+- Título da task
+- Status
+- Projeto
+- Milestone/Sprint
 
 ### Sincronizar com GitHub
 
@@ -65,6 +79,13 @@ O comando `sync` oferece três opções:
 - **Local → GitHub**: Envia suas tasks locais para o GitHub como issues
 - **GitHub → Local**: Baixa issues do GitHub como tasks locais
 - **Ambos**: Sincronização bidirecional
+
+A sincronização agora oferece:
+
+- Detecção inteligente de projetos (ignorando prefixo '@')
+- Detecção case-insensitive de projetos e milestones
+- Logs detalhados do processo de sincronização
+- Arquivos de tasks renomeados com prefixo do número da issue (#)
 
 ### Informações do GitHub
 
@@ -90,6 +111,13 @@ Tasks são armazenadas localmente no diretório `.task/issues` em formato JSON c
   "github_issue_number": 42
 }
 ```
+
+Os arquivos são nomeados seguindo o padrão:
+
+- Para tasks não sincronizadas: `ID-titulo-da-task.json`
+- Para tasks sincronizadas: `#NUMERO-ID-titulo-da-task.json`
+
+Onde `NUMERO` é o número da issue no GitHub.
 
 ## Desenvolvimento
 
