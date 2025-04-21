@@ -2,19 +2,7 @@ import chalk from "chalk";
 import Table from "cli-table3";
 import fs from "fs-extra";
 import * as path from "path";
-import { fetchGitHubIssues } from "../utils/github.js";
-
-// Interface para as tarefas
-interface Task {
-  id: string;
-  title: string;
-  status: string;
-  project?: string;
-  milestone?: string;
-  issue?: number;
-  state?: string;
-  github_issue_number?: number;
-}
+import { Task, fetchGitHubIssue, fetchGitHubIssues, fetchIssueProjectInfo } from "../utils/github.js";
 
 interface GitHubIssue {
   number: number;
@@ -50,22 +38,13 @@ export const listTasks = async (): Promise<void> => {
         // Ignorar tarefas marcadas como excluídas
         if (taskData.deleted) continue;
 
-        tasks.push({
-          id: taskData.id,
-          title: taskData.title,
-          status: taskData.status,
-          project: taskData.project,
-          milestone: taskData.milestone,
-          issue: taskData.issue,
-          state: taskData.state || "local",
-          github_issue_number: taskData.github_issue_number,
-        });
+        tasks.push(taskData);
       } catch (error) {
         console.error(`Erro ao ler o arquivo de tarefa ${file}:`, error);
       }
     }
 
-    // Obter issues do GitHub para atualizar estados
+    // Obter issues do GitHub para atualizar estados e informações
     const githubIssues = await fetchGitHubIssues();
 
     // Mapa de issue number para estado
@@ -75,11 +54,36 @@ export const listTasks = async (): Promise<void> => {
     });
 
     // Atualizar estado das tarefas locais com base nas issues do GitHub
-    tasks.forEach((task) => {
-      if (task.issue && issueStates.has(task.issue)) {
-        task.state = issueStates.get(task.issue);
+    // e buscar informações atualizadas de projeto e milestone
+    console.log(chalk.blue("\n🔄 Atualizando informações das tasks do GitHub..."));
+
+    for (const task of tasks) {
+      if (task.github_issue_number) {
+        // Atualizar estado se disponível no mapa
+        if (issueStates.has(task.github_issue_number)) {
+          task.state = issueStates.get(task.github_issue_number);
+        }
+
+        // Buscar informações detalhadas da issue para milestone atual
+        try {
+          const issue = await fetchGitHubIssue(task.github_issue_number);
+          if (issue) {
+            // Atualizar milestone com valor atual do GitHub
+            task.milestone = issue.milestone?.title || "";
+
+            // Buscar projeto atualizado
+            const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
+            if (projectInfo) {
+              task.project = projectInfo;
+            } else {
+              task.project = "";
+            }
+          }
+        } catch (error) {
+          // Silenciar erro, manter dados locais
+        }
       }
-    });
+    }
 
     // Preparar tabela para exibição - usando o mesmo estilo do comando sync
     const table = new Table({
@@ -96,10 +100,11 @@ export const listTasks = async (): Promise<void> => {
 
     // Adicionar tarefas à tabela com cores
     tasks.forEach((task) => {
-      // Usar github_issue_number se disponível, senão usar issue
-      const issueNumber = task.github_issue_number || task.issue;
+      // Usar github_issue_number
+      const issueNumber = task.github_issue_number;
       const issuePrefix = issueNumber ? `#${issueNumber} - ` : "";
-      const projectName = task.project && task.project.startsWith("@") ? task.project.substring(1) : task.project;
+      // Remover '@' do nome do projeto se existir e garantir N/A se vazio
+      const projectName = task.project ? (task.project.startsWith("@") ? task.project.substring(1) : task.project) : "";
 
       // Determinar o status do GitHub
       let githubStatus = "N/A";

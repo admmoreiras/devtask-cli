@@ -80,9 +80,13 @@ async function showTasksTable() {
             const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
             if (projectInfo) {
               task.project = projectInfo;
+            } else {
+              // Definir como string vazia se não encontrar projeto
+              task.project = "";
             }
           } catch (error) {
-            // Silenciar erro
+            // Silenciar erro e garantir que project seja string vazia
+            task.project = "";
           }
         }
         return task;
@@ -103,8 +107,8 @@ async function showTasksTable() {
 
     tasksWithProjects.forEach((task: Task) => {
       const issuePrefix = task.github_issue_number ? `#${task.github_issue_number} - ` : "";
-      // Remover '@' do nome do projeto se existir
-      const projectName = task.project && task.project.startsWith("@") ? task.project.substring(1) : task.project;
+      // Remover '@' do nome do projeto se existir e garantir N/A se vazio
+      const projectName = task.project ? (task.project.startsWith("@") ? task.project.substring(1) : task.project) : "";
 
       // Determinar o status do GitHub
       let githubStatus = "N/A";
@@ -350,8 +354,19 @@ async function pullFromGitHub() {
       if (taskMap.has(issue.number)) {
         // Atualizar task existente
         console.log(chalk.blue(`- Atualizando task para issue #${issue.number}: ${issue.title}`));
-        const task = taskMap.get(issue.number)!;
-        await updateLocalTaskFromIssue(task, issue);
+
+        // Obter milestone atual antes da atualização
+        const currentTask = taskMap.get(issue.number)!;
+        const oldMilestone = currentTask.milestone || "Nenhuma";
+        const newMilestone = issue.milestone?.title || "Nenhuma";
+
+        await updateLocalTaskFromIssue(currentTask, issue);
+
+        // Mostrar se a milestone foi atualizada
+        if (oldMilestone !== newMilestone) {
+          console.log(chalk.yellow(`  - Milestone atualizada: "${oldMilestone}" → "${newMilestone}"`));
+        }
+
         updated++;
       } else {
         // Criar nova task

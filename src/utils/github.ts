@@ -1,3 +1,4 @@
+import chalk from "chalk";
 import dotenv from "dotenv";
 import fs from "fs-extra";
 import { Octokit } from "octokit";
@@ -509,24 +510,36 @@ export async function fetchGitHubIssue(issueNumber: number): Promise<any | null>
   }
 }
 
+/**
+ * Extrai o status a partir de uma issue do GitHub
+ * @param issue Issue do GitHub
+ * @returns Status extraído (done, todo, in progress, etc)
+ */
+function extractStatusFromIssue(issue: any): string {
+  // Se a issue estiver fechada, o status é sempre "done"
+  if (issue.state === "closed") {
+    return "done";
+  }
+
+  // Verificar labels para status específico
+  if (issue.labels && issue.labels.length > 0) {
+    // Procurar por um label de status
+    const statusLabel = issue.labels.find((label: any) => label.name.startsWith("status:"));
+
+    if (statusLabel) {
+      return statusLabel.name.replace("status:", "");
+    }
+  }
+
+  // Default para issues abertas sem label específico
+  return "todo";
+}
+
 // Função para atualizar task local a partir de uma issue do GitHub
 export async function updateLocalTaskFromIssue(task: Task, issue: any): Promise<boolean> {
   try {
-    // Extrair status dos labels ou estado da issue
-    let status = task.status; // Manter o status atual por padrão
-
-    if (issue.state === "closed") {
-      status = "done";
-    } else if (issue.labels && issue.labels.length > 0) {
-      // Procurar por um label de status
-      const statusLabel = issue.labels.find((label: any) => label.name.startsWith("status:"));
-
-      if (statusLabel) {
-        status = statusLabel.name.replace("status:", "");
-      } else {
-        status = "todo"; // Estado padrão para issues abertas sem label de status
-      }
-    }
+    // Extrair status da issue usando a função auxiliar
+    const status = extractStatusFromIssue(issue);
 
     // Primeiro remover arquivo antigo se ele existir
     const oldFilePath = path.join(
@@ -571,15 +584,24 @@ export async function updateLocalTaskFromIssue(task: Task, issue: any): Promise<
       }
     }
 
+    // Mostrar mudança de status se houver
+    if (task.status !== status) {
+      console.log(chalk.yellow(`  - Status atualizado: "${task.status}" → "${status}"`));
+    }
+
     // Atualizar propriedades
     task.title = issue.title;
     task.description = issue.body ? issue.body.split("---")[0].trim() : "";
     task.status = status;
-    task.milestone = issue.milestone?.title || task.milestone;
+    // Sempre usar a milestone da issue (ou string vazia se não tiver)
+    task.milestone = issue.milestone?.title || "";
     task.synced = true;
     task.github_issue_number = issue.number;
     task.lastSyncAt = lastSyncAt;
     task.state = issue.state; // Armazenar o estado da issue (open/closed)
+
+    // Inicializar o projeto como vazio por padrão
+    task.project = "";
 
     // Se encontramos um projeto na descrição, usar ele
     if (projectFromDesc) {
@@ -637,18 +659,8 @@ export async function createLocalTaskFromIssue(issue: any): Promise<void> {
       .replace(/\s+/g, "-")
       .replace(/[^\w-]/g, "");
 
-    // Extrair status do label ou do estado da issue
-    let status = "todo";
-    if (issue.state === "closed") {
-      status = "done";
-    } else if (issue.labels && issue.labels.length > 0) {
-      // Procurar por um label de status
-      const statusLabel = issue.labels.find((label: any) => label.name.startsWith("status:"));
-
-      if (statusLabel) {
-        status = statusLabel.name.replace("status:", "");
-      }
-    }
+    // Extrair o status da issue usando a função auxiliar
+    const status = extractStatusFromIssue(issue);
 
     // Extrair timestamp da última atualização da issue
     let lastSyncAt: string;
@@ -671,11 +683,14 @@ export async function createLocalTaskFromIssue(issue: any): Promise<void> {
       // Silenciar erro
     }
 
+    // Obter a milestone da issue (ou string vazia se não existir)
+    const milestoneName = issue.milestone?.title || "";
+
     const task: Task = {
       id,
       title: issue.title,
       description: issue.body ? issue.body.split("---")[0].trim() : "", // Remover metadados do corpo
-      milestone: issue.milestone?.title || "",
+      milestone: milestoneName,
       project: projectName, // Usar o projeto vinculado à issue
       status: status,
       synced: true,
