@@ -134,6 +134,8 @@ export async function listMilestones(): Promise<void> {
 export async function fetchProjects(): Promise<Map<string, string>> {
   const projectMap = new Map<string, string>();
   try {
+    console.log("\n🔍 Buscando projetos no GitHub...");
+
     // Tentar com GraphQL para ProjectsV2
     const isUserAccount = await isUser();
 
@@ -170,19 +172,23 @@ export async function fetchProjects(): Promise<Map<string, string>> {
 
         // Adicionar projetos diretamente ligados ao repositório
         if (userResponse.repository?.projectsV2?.nodes) {
+          console.log(`\n📊 Projetos encontrados diretamente no repositório:`);
           userResponse.repository.projectsV2.nodes.forEach((project: any) => {
+            console.log(`  - "${project.title}" (ID: ${project.id})`);
             projectMap.set(project.title, project.id);
           });
         }
 
         // Verificar projetos do usuário para ver se estão associados ao repositório
         if (userResponse.user?.projectsV2?.nodes) {
+          console.log(`\n📊 Projetos do usuário associados ao repositório:`);
           userResponse.user.projectsV2.nodes.forEach((project: any) => {
             // Verificar se o projeto está associado ao repositório especificado
             if (project.repositories?.nodes) {
               const isAssociated = project.repositories.nodes.some((repo: any) => repo.name === GITHUB_REPO);
 
               if (isAssociated) {
+                console.log(`  - "${project.title}" (ID: ${project.id})`);
                 projectMap.set(project.title, project.id);
               }
             }
@@ -227,19 +233,23 @@ export async function fetchProjects(): Promise<Map<string, string>> {
 
         // Adicionar projetos diretamente ligados ao repositório
         if (response.repository?.projectsV2?.nodes) {
+          console.log(`\n📊 Projetos encontrados diretamente no repositório:`);
           response.repository.projectsV2.nodes.forEach((project: any) => {
+            console.log(`  - "${project.title}" (ID: ${project.id})`);
             projectMap.set(project.title, project.id);
           });
         }
 
         // Verificar projetos da organização para ver se estão associados ao repositório
         if (response.organization?.projectsV2?.nodes) {
+          console.log(`\n📊 Projetos da organização associados ao repositório:`);
           response.organization.projectsV2.nodes.forEach((project: any) => {
             // Verificar se o projeto está associado ao repositório especificado
             if (project.repositories?.nodes) {
               const isAssociated = project.repositories.nodes.some((repo: any) => repo.name === GITHUB_REPO);
 
               if (isAssociated) {
+                console.log(`  - "${project.title}" (ID: ${project.id})`);
                 projectMap.set(project.title, project.id);
               }
             }
@@ -252,6 +262,8 @@ export async function fetchProjects(): Promise<Map<string, string>> {
         }
       }
     }
+
+    console.log(`\n📊 Total de projetos encontrados: ${projectMap.size}`);
 
     return projectMap;
   } catch (error) {
@@ -415,10 +427,27 @@ export async function fetchGitHubIssues(): Promise<any[]> {
   }
 }
 
+// Função para gerar nome de arquivo da task
+function getTaskFilename(task: Task): string {
+  const slug = task.title
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^\w-]/g, "");
+
+  // Se tiver número de issue, incluir no nome do arquivo
+  if (task.github_issue_number) {
+    return `#${task.github_issue_number}-${task.id}-${slug}.json`;
+  }
+
+  // Se não tiver, usar o formato original
+  return `${task.id}-${slug}.json`;
+}
+
 // Função para atualizar task local com informações do GitHub
 export async function updateTaskWithGitHubInfo(task: Task, issueNumber: number): Promise<void> {
   try {
-    const taskPath = path.join(
+    // Primeiro remover arquivo antigo se ele existir
+    const oldFilePath = path.join(
       ".task/issues",
       `${task.id}-${task.title
         .toLowerCase()
@@ -430,7 +459,17 @@ export async function updateTaskWithGitHubInfo(task: Task, issueNumber: number):
     task.synced = true;
     task.github_issue_number = issueNumber;
 
-    // Salvar no arquivo
+    // Gerar novo nome de arquivo com o número da issue
+    const taskPath = path.join(".task/issues", getTaskFilename(task));
+
+    // Remover o arquivo antigo se existir
+    try {
+      await fs.remove(oldFilePath);
+    } catch (error) {
+      // Ignora erro se o arquivo não existir
+    }
+
+    // Salvar no arquivo com novo nome
     await fs.writeJSON(taskPath, task, { spaces: 2 });
   } catch (error) {
     console.error(`❌ Erro ao atualizar task local "${task.title}":`, error);
@@ -472,20 +511,47 @@ export async function updateLocalTaskFromIssue(task: Task, issue: any): Promise<
       }
     }
 
+    // Primeiro remover arquivo antigo se ele existir
+    const oldFilePath = path.join(
+      ".task/issues",
+      `${task.id}-${task.title
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/[^\w-]/g, "")}.json`
+    );
+
+    if (task.github_issue_number) {
+      const oldFileWithGithub = path.join(
+        ".task/issues",
+        `#${task.github_issue_number}-${task.id}-${task.title
+          .toLowerCase()
+          .replace(/\s+/g, "-")
+          .replace(/[^\w-]/g, "")}.json`
+      );
+      try {
+        await fs.remove(oldFileWithGithub);
+      } catch (error) {
+        // Ignora erro se o arquivo não existir
+      }
+    }
+
     // Atualizar propriedades
     task.title = issue.title;
     task.description = issue.body ? issue.body.split("---")[0].trim() : "";
     task.status = status;
     task.milestone = issue.milestone?.title || task.milestone;
     task.synced = true;
+    task.github_issue_number = issue.number;
 
-    // Salvar as alterações
-    const slug = task.title
-      .toLowerCase()
-      .replace(/\s+/g, "-")
-      .replace(/[^\w-]/g, "");
+    // Remover o arquivo antigo se existir
+    try {
+      await fs.remove(oldFilePath);
+    } catch (error) {
+      // Ignora erro se o arquivo não existir
+    }
 
-    const taskPath = path.join(".task/issues", `${task.id}-${slug}.json`);
+    // Salvar as alterações com novo nome de arquivo
+    const taskPath = path.join(".task/issues", getTaskFilename(task));
     await fs.writeJSON(taskPath, task, { spaces: 2 });
 
     console.log(`✅ Task local "${task.title}" atualizada a partir da issue #${issue.number}`);
@@ -542,7 +608,8 @@ export async function createLocalTaskFromIssue(issue: any): Promise<void> {
       github_issue_number: issue.number,
     };
 
-    const taskPath = path.join(".task/issues", `${id}-${slug}.json`);
+    // Usar novo formato de nome com número da issue
+    const taskPath = path.join(".task/issues", getTaskFilename(task));
     await fs.ensureDir(path.join(".task/issues"));
     await fs.writeJSON(taskPath, task, { spaces: 2 });
     console.log(`✅ Task local criada a partir da issue #${issue.number}`);
@@ -678,10 +745,12 @@ export async function fetchIssueProjectInfo(issueNumber: number): Promise<string
     // Verificar se a issue está em algum projeto
     if (response.node.projectItems && response.node.projectItems.nodes.length > 0) {
       // Projetos clássicos
-      return response.node.projectItems.nodes[0].project.title;
+      const projectTitle = response.node.projectItems.nodes[0].project.title;
+      return projectTitle.startsWith("@") ? projectTitle.substring(1) : projectTitle;
     } else if (response.node.projectsV2 && response.node.projectsV2.nodes.length > 0) {
       // Projetos v2
-      return response.node.projectsV2.nodes[0].title;
+      const projectTitle = response.node.projectsV2.nodes[0].title;
+      return projectTitle.startsWith("@") ? projectTitle.substring(1) : projectTitle;
     }
 
     return null;
@@ -716,6 +785,11 @@ export async function createMilestone(title: string, description: string = ""): 
 // Função para criar um projeto no GitHub (ProjectV2)
 export async function createProject(title: string, description: string = ""): Promise<string | null> {
   try {
+    console.log(`\n🔍 Criando projeto "${title}" no GitHub...`);
+
+    // Se o título já tiver '@', vamos remover para padronizar
+    const normalizedTitle = title.startsWith("@") ? title.substring(1) : title;
+
     // Vamos obter primeiro o ID do usuário ou organização
     let ownerId: string | null = null;
     const isUserAccount = await isUser();
@@ -754,7 +828,7 @@ export async function createProject(title: string, description: string = ""): Pr
       mutation {
         createProjectV2(input: {
           ownerId: "${ownerId}",
-          title: "${title}"
+          title: "${normalizedTitle}"
         }) {
           projectV2 {
             id
@@ -767,7 +841,12 @@ export async function createProject(title: string, description: string = ""): Pr
 
     if (response?.createProjectV2?.projectV2?.id) {
       const projectId = response.createProjectV2.projectV2.id;
-      console.log(`✅ Projeto "${title}" criado com sucesso`);
+      console.log(`✅ Projeto "${normalizedTitle}" criado com sucesso (ID: ${projectId})`);
+
+      // Buscar projetos novamente para atualizar o cache
+      console.log(`🔄 Atualizando cache de projetos...`);
+      const projects = await fetchProjects();
+
       return projectId;
     }
     return null;

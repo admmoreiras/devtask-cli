@@ -47,11 +47,14 @@ export async function listTasks() {
     });
 
     tasksWithProjects.forEach((task: Task) => {
-      const issuePrefix = task.github_issue_number ? `${task.github_issue_number} - ` : "";
+      const issuePrefix = task.github_issue_number ? `#${task.github_issue_number} - ` : "";
+      // Remover '@' do nome do projeto se existir
+      const projectName = task.project && task.project.startsWith("@") ? task.project.substring(1) : task.project;
+
       table.push([
         chalk.green(`${issuePrefix}${task.title}`),
         task.status || "N/A",
-        task.project || "N/A",
+        projectName || "N/A",
         task.milestone || "N/A",
       ]);
     });

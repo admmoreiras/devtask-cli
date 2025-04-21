@@ -96,11 +96,14 @@ async function showTasksTable() {
     });
 
     tasksWithProjects.forEach((task: Task) => {
-      const issuePrefix = task.github_issue_number ? `${task.github_issue_number} - ` : "";
+      const issuePrefix = task.github_issue_number ? `#${task.github_issue_number} - ` : "";
+      // Remover '@' do nome do projeto se existir
+      const projectName = task.project && task.project.startsWith("@") ? task.project.substring(1) : task.project;
+
       table.push([
         chalk.green(`${issuePrefix}${task.title}`),
         task.status || "N/A",
-        task.project || "N/A",
+        projectName || "N/A",
         task.milestone || "N/A",
       ]);
     });
@@ -162,32 +165,70 @@ async function pushToGitHub() {
       }
 
       // Verificar projeto antes de sincronizar
-      if (task.project && !projects.has(task.project)) {
-        const { createNewProject } = await inquirer.prompt([
-          {
-            type: "confirm",
-            name: "createNewProject",
-            message: `O projeto "${task.project}" não existe no GitHub. Deseja criá-lo?`,
-            default: true,
-          },
-        ]);
+      if (task.project) {
+        // Verificar variantes do nome do projeto (com e sem '@')
+        const projectName = task.project;
+        const projectNameWithAt = projectName.startsWith("@") ? projectName : `@${projectName}`;
+        const projectNameWithoutAt = projectName.startsWith("@") ? projectName.substring(1) : projectName;
 
-        if (createNewProject) {
-          const projectId = await createProject(task.project);
-          if (!projectId) {
-            console.log(`⚠️ Não foi possível criar o projeto. A issue será criada sem projeto.`);
+        // Imprimir informações para depuração
+        console.log(`\nVerificando projeto: "${projectName}"`);
+        console.log(`Variações: "${projectNameWithAt}", "${projectNameWithoutAt}"`);
+        console.log(`Projetos disponíveis no GitHub:`);
+        for (const [name, id] of projects.entries()) {
+          console.log(`  - "${name}"`);
+        }
+
+        // Verificar se existe o projeto em qualquer um dos formatos (case insensitive)
+        let projectExists = false;
+        let matchedProjectName = "";
+
+        for (const [name, id] of projects.entries()) {
+          const normalizedName = name.toLowerCase();
+          if (
+            normalizedName === projectName.toLowerCase() ||
+            normalizedName === projectNameWithAt.toLowerCase() ||
+            normalizedName === projectNameWithoutAt.toLowerCase()
+          ) {
+            projectExists = true;
+            matchedProjectName = name;
+            console.log(`✅ Projeto encontrado como "${matchedProjectName}"`);
+            break;
+          }
+        }
+
+        if (!projectExists) {
+          console.log(`❌ Projeto não encontrado em nenhum formato`);
+          const { createNewProject } = await inquirer.prompt([
+            {
+              type: "confirm",
+              name: "createNewProject",
+              message: `O projeto "${projectName}" não existe no GitHub. Deseja criá-lo?`,
+              default: true,
+            },
+          ]);
+
+          if (createNewProject) {
+            const projectId = await createProject(projectName);
+            if (!projectId) {
+              console.log(`⚠️ Não foi possível criar o projeto. A issue será criada sem projeto.`);
+              task.project = "";
+              // Atualizar o arquivo local
+              await fs.writeJSON(taskPath, task, { spaces: 2 });
+            } else {
+              // Atualizar o mapa de projetos para incluir o novo projeto
+              projects.set(projectName, projectId);
+            }
+          } else {
+            console.log(`⚠️ A issue será criada sem projeto.`);
             task.project = "";
             // Atualizar o arquivo local
             await fs.writeJSON(taskPath, task, { spaces: 2 });
-          } else {
-            // Atualizar o mapa de projetos para incluir o novo projeto
-            projects.set(task.project, projectId);
           }
         } else {
-          console.log(`⚠️ A issue será criada sem projeto.`);
-          task.project = "";
-          // Atualizar o arquivo local
-          await fs.writeJSON(taskPath, task, { spaces: 2 });
+          // Se o projeto existir, garantir que usamos o nome correto como está no GitHub
+          console.log(`✅ Usando nome de projeto "${matchedProjectName}" como encontrado no GitHub`);
+          task.project = matchedProjectName;
         }
       }
 
