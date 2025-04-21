@@ -130,45 +130,28 @@ export async function listMilestones(): Promise<void> {
 export async function fetchProjects(): Promise<Map<string, string>> {
   const projectMap = new Map<string, string>();
   try {
-    // Primeiro tentar com a API REST para projetos clássicos
-    try {
-      interface Project {
-        id: number;
-        name: string;
-      }
-
-      // Usar fetch diretamente para a API REST
-      const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/projects`, {
-        headers: {
-          Authorization: `token ${GITHUB_TOKEN}`,
-          Accept: "application/vnd.github.v3+json",
-        },
-      });
-
-      if (response.ok) {
-        const projects = (await response.json()) as Project[];
-        if (projects.length > 0) {
-          projects.forEach((project) => {
-            if (project.name) {
-              projectMap.set(project.name.toLowerCase(), String(project.id));
-            }
-          });
-          return projectMap;
-        }
-      }
-    } catch (restError) {
-      console.log("Buscando projetos via API REST...");
-    }
-
-    // Se não encontrou projetos clássicos, tentar com GraphQL para ProjectsV2
+    // Tentar com GraphQL para ProjectsV2
     const isUserAccount = await isUser();
 
     if (isUserAccount) {
-      // Buscar projetos de usuário
+      // Buscar projetos de usuário e verificar se estão associados ao repositório
       try {
         const userQuery = `
           query {
             user(login: "${GITHUB_OWNER}") {
+              projectsV2(first: 100) {
+                nodes {
+                  id
+                  title
+                  repositories(first: 50) {
+                    nodes {
+                      name
+                    }
+                  }
+                }
+              }
+            }
+            repository(owner: "${GITHUB_OWNER}", name: "${GITHUB_REPO}") {
               projectsV2(first: 100) {
                 nodes {
                   id
@@ -179,10 +162,26 @@ export async function fetchProjects(): Promise<Map<string, string>> {
           }
         `;
 
-        const userResponse = await octokit.graphql<ProjectsResponse>(userQuery);
+        const userResponse = await octokit.graphql<any>(userQuery);
+
+        // Adicionar projetos diretamente ligados ao repositório
+        if (userResponse.repository?.projectsV2?.nodes) {
+          userResponse.repository.projectsV2.nodes.forEach((project: any) => {
+            projectMap.set(project.title, project.id);
+          });
+        }
+
+        // Verificar projetos do usuário para ver se estão associados ao repositório
         if (userResponse.user?.projectsV2?.nodes) {
-          userResponse.user.projectsV2.nodes.forEach((project) => {
-            projectMap.set(project.title.toLowerCase(), project.id);
+          userResponse.user.projectsV2.nodes.forEach((project: any) => {
+            // Verificar se o projeto está associado ao repositório especificado
+            if (project.repositories?.nodes) {
+              const isAssociated = project.repositories.nodes.some((repo: any) => repo.name === GITHUB_REPO);
+
+              if (isAssociated) {
+                projectMap.set(project.title, project.id);
+              }
+            }
           });
         }
       } catch (graphqlError: any) {
@@ -192,11 +191,24 @@ export async function fetchProjects(): Promise<Map<string, string>> {
         }
       }
     } else {
-      // Buscar projetos de organização
+      // Buscar projetos de organização e verificar se estão associados ao repositório
       try {
         const orgQuery = `
           query {
             organization(login: "${GITHUB_OWNER}") {
+              projectsV2(first: 100) {
+                nodes {
+                  id
+                  title
+                  repositories(first: 50) {
+                    nodes {
+                      name
+                    }
+                  }
+                }
+              }
+            }
+            repository(owner: "${GITHUB_OWNER}", name: "${GITHUB_REPO}") {
               projectsV2(first: 100) {
                 nodes {
                   id
@@ -207,10 +219,26 @@ export async function fetchProjects(): Promise<Map<string, string>> {
           }
         `;
 
-        const response = await octokit.graphql<ProjectsResponse>(orgQuery);
+        const response = await octokit.graphql<any>(orgQuery);
+
+        // Adicionar projetos diretamente ligados ao repositório
+        if (response.repository?.projectsV2?.nodes) {
+          response.repository.projectsV2.nodes.forEach((project: any) => {
+            projectMap.set(project.title, project.id);
+          });
+        }
+
+        // Verificar projetos da organização para ver se estão associados ao repositório
         if (response.organization?.projectsV2?.nodes) {
-          response.organization.projectsV2.nodes.forEach((project) => {
-            projectMap.set(project.title.toLowerCase(), project.id);
+          response.organization.projectsV2.nodes.forEach((project: any) => {
+            // Verificar se o projeto está associado ao repositório especificado
+            if (project.repositories?.nodes) {
+              const isAssociated = project.repositories.nodes.some((repo: any) => repo.name === GITHUB_REPO);
+
+              if (isAssociated) {
+                projectMap.set(project.title, project.id);
+              }
+            }
           });
         }
       } catch (graphqlError: any) {
@@ -236,16 +264,17 @@ export async function fetchProjects(): Promise<Map<string, string>> {
 // Função para listar projetos disponíveis
 export async function listProjects(): Promise<void> {
   try {
-    console.log("\nProjetos disponíveis:");
+    console.log(`\nProjetos disponíveis do repositório "${GITHUB_REPO}":`);
 
     // Tentar com GraphQL (ProjectsV2)
     try {
       const projects = await fetchProjects();
       if (projects.size === 0) {
-        console.log("  Nenhum projeto V2 encontrado");
+        console.log("  Nenhum projeto encontrado para este repositório");
+        console.log("  Dica: Vincule um projeto ao repositório no GitHub para ele aparecer aqui");
       } else {
         for (const [name, id] of projects.entries()) {
-          console.log(`  📊 ${name} (Projeto V2)`);
+          console.log(`  📊 ${name}`);
         }
       }
     } catch (error: any) {
@@ -261,7 +290,7 @@ export async function listProjects(): Promise<void> {
     console.log("\n🔑 Se não conseguir ver seus projetos:");
     console.log("1. Use 'Personal access tokens (classic)' e não 'Fine-grained tokens'");
     console.log("2. Verifique se o token tem os escopos corretos (repo, project)");
-    console.log("3. Crie um projeto no repositório se ainda não tiver nenhum");
+    console.log("3. Certifique-se que o projeto está vinculado ao repositório no GitHub");
   } catch (error) {
     console.error("❌ Erro ao listar projetos:", error);
   }
@@ -333,7 +362,9 @@ export async function createGitHubIssue(task: Task): Promise<number | null> {
     // Se tiver um projeto definido, buscar projetos e adicionar a issue ao projeto
     if (task.project) {
       const projects = await fetchProjects();
-      const projectId = projects.get(task.project.toLowerCase());
+
+      // Tentar encontrar o projeto pela correspondência exata
+      const projectId = projects.get(task.project);
 
       if (projectId) {
         const added = await addIssueToProject(response.data.node_id, projectId);
