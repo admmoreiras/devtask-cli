@@ -142,6 +142,28 @@ Inicia um prompt interativo para conversar com a IA para ajuda com desenvolvimen
 - Geração de código JavaScript/TypeScript sob demanda
 - Execução direta de código gerado no terminal
 - Histórico de conversas salvo localmente para continuar discussões anteriores
+- **NOVO**: Exploração e análise de arquivos do projeto direto pelo chat
+
+#### Comandos do explorador de arquivos no chat
+
+Durante a sessão de chat, você pode usar os seguintes comandos para interagir com os arquivos do projeto:
+
+- `!ls [caminho]` - Lista arquivos e diretórios no caminho especificado
+- `!cat [arquivo]` - Mostra o conteúdo de um arquivo
+- `!tree [caminho]` - Mostra a estrutura de diretórios em forma de árvore
+- `!help` - Mostra a lista de comandos disponíveis
+
+Além disso, você pode pedir ao assistente para analisar arquivos usando linguagem natural:
+
+```
+Você: analise o arquivo src/index.ts
+Assistente: [exibe o conteúdo do arquivo e oferece análise]
+
+Você: mostre o código em src/commands/create.ts
+Assistente: [exibe o conteúdo do arquivo]
+```
+
+O sistema detecta automaticamente estas solicitações e exibe o conteúdo do arquivo para análise.
 
 ### Limpar histórico de conversas
 
@@ -150,60 +172,6 @@ devtask clear-history
 ```
 
 Limpa o histórico de conversas salvo em `~/.devtask-cli/history.json`.
-
-## Exemplos de uso do Chat
-
-### Consulta e geração de código
-
-````
-devtask chat
-
-🤖 DevTask Chat - Assistente de Desenvolvimento
-Digite suas perguntas ou comandos. Digite 'exit' para sair.
-
-Você: Como posso ler um arquivo JSON em Node.js?
-
-Assistente: Você pode ler um arquivo JSON em Node.js usando o módulo `fs` (File System) com `require` ou `import`. Aqui está um exemplo:
-
-```javascript
-// Usando require
-const fs = require('fs');
-
-// Ler o arquivo
-fs.readFile('caminho/para/arquivo.json', 'utf8', (err, data) => {
-  if (err) {
-    console.error('Erro ao ler o arquivo:', err);
-    return;
-  }
-
-  // Converter string JSON para objeto JavaScript
-  const jsonData = JSON.parse(data);
-  console.log(jsonData);
-});
-````
-
-Ou uma versão mais moderna com Promises:
-
-```javascript
-// Usando import e promises
-import fs from "fs/promises";
-
-async function lerJson() {
-  try {
-    const data = await fs.readFile("caminho/para/arquivo.json", "utf8");
-    const jsonData = JSON.parse(data);
-    console.log(jsonData);
-  } catch (err) {
-    console.error("Erro ao ler o arquivo:", err);
-  }
-}
-
-lerJson();
-```
-
-Deseja executar este código? (Sim/Não)
-
-````
 
 ## Estrutura
 
@@ -220,7 +188,7 @@ Tasks são armazenadas localmente no diretório `.task/issues` em formato JSON c
   "synced": true,
   "github_issue_number": 42
 }
-````
+```
 
 Os templates são armazenados no diretório `.task/templates` em formato JSON com a seguinte estrutura:
 
@@ -240,6 +208,14 @@ Os arquivos de tarefas são nomeados seguindo o padrão:
 - Para tasks sincronizadas: `#NUMERO-ID-titulo-da-task.json`
 
 Onde `NUMERO` é o número da issue no GitHub.
+
+## Segurança no explorador de arquivos
+
+O explorador de arquivos integrado inclui medidas de segurança para garantir que:
+
+- Apenas arquivos dentro do diretório do projeto sejam acessíveis
+- Arquivos e diretórios sensíveis (como `.env`, `.git`, `node_modules`) sejam bloqueados
+- Informações sigilosas não sejam compartilhadas com a IA
 
 ## Desenvolvimento
 

@@ -2,8 +2,9 @@ import fs from "fs-extra";
 import os from "os";
 import path from "path";
 
+// Atualização: adicionando 'system' como valor possível para role
 interface ChatMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
 }
 

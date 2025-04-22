@@ -1,11 +1,12 @@
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { executeCode } from "../utils/code-executor.js";
+import { getFileStructure, isPathSafe, listDirectory, readFile } from "../utils/file-explorer.js";
 import { getHistory, saveToHistory } from "../utils/history.js";
 import { checkOpenAIApiKey } from "../utils/openai.js";
 
 interface ChatMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
 }
 
@@ -34,6 +35,11 @@ export async function startChat() {
 
   console.log(chalk.green("\n🤖 DevTask Chat - Assistente de Desenvolvimento"));
   console.log(chalk.blue("Digite suas perguntas ou comandos. Digite 'exit' para sair.\n"));
+  console.log(chalk.yellow("Comandos especiais:"));
+  console.log(chalk.yellow("  !ls [caminho] - Lista arquivos e diretórios"));
+  console.log(chalk.yellow("  !cat [arquivo] - Mostra o conteúdo de um arquivo"));
+  console.log(chalk.yellow("  !tree [caminho] - Mostra a estrutura de diretórios"));
+  console.log(chalk.yellow("  !help - Mostra todos os comandos disponíveis\n"));
 
   // Opcionalmente carregar histórico anterior
   const useHistory = await inquirer.prompt([
@@ -50,6 +56,13 @@ export async function startChat() {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+
+  // Adicionar mensagem do sistema para contextualizar sobre o projeto
+  currentSession.messages.push({
+    role: "system",
+    content:
+      "Você é um assistente de desenvolvimento que pode analisar código e arquivos do projeto atual. O usuário pode pedir para você analisar arquivos específicos ou a estrutura do projeto. Tente ser o mais útil possível com base no código que você visualiza.",
+  });
 
   if (useHistory.loadHistory) {
     const history = await getHistory();
@@ -68,14 +81,23 @@ export async function startChat() {
 
       currentSession = history.sessions[selectedSession];
 
-      // Mostrar últimas 3 mensagens da conversa ou todas se forem menos que 3
-      const messagesToShow = currentSession.messages.slice(
-        Math.max(0, currentSession.messages.length - 6),
-        currentSession.messages.length
-      );
+      // Garantir que haja uma mensagem de sistema
+      if (!currentSession.messages.some((msg) => msg.role === "system")) {
+        currentSession.messages.unshift({
+          role: "system",
+          content:
+            "Você é um assistente de desenvolvimento que pode analisar código e arquivos do projeto atual. O usuário pode pedir para você analisar arquivos específicos ou a estrutura do projeto. Tente ser o mais útil possível com base no código que você visualiza.",
+        });
+      }
+
+      // Mostrar últimas mensagens da conversa ou todas se forem poucas
+      const messagesToShow = currentSession.messages
+        .filter((msg) => msg.role !== "system")
+        .slice(Math.max(0, currentSession.messages.length - 6), currentSession.messages.length);
 
       console.log(chalk.yellow("\nRetomando conversa anterior:"));
       messagesToShow.forEach((msg) => {
+        if (msg.role === "system") return; // Não mostrar mensagens do sistema
         const prefix = msg.role === "user" ? chalk.green("Você: ") : chalk.blue("Assistente: ");
         console.log(prefix + msg.content.split("\n")[0].substring(0, 100) + (msg.content.length > 100 ? "..." : ""));
       });
@@ -134,6 +156,82 @@ export async function startChat() {
     return response;
   };
 
+  // Função para processar comandos especiais
+  const processSpecialCommand = async (command: string): Promise<string | null> => {
+    // Dividir o comando em partes (comando e argumentos)
+    const parts = command.trim().split(/\s+/);
+    const cmd = parts[0].toLowerCase();
+    const args = parts.slice(1).join(" ");
+
+    switch (cmd) {
+      case "!help":
+        return `
+Comandos disponíveis:
+- !ls [caminho] - Lista arquivos e diretórios
+- !cat [arquivo] - Mostra o conteúdo de um arquivo
+- !tree [caminho] - Mostra a estrutura de diretórios
+- !help - Mostra esta ajuda`;
+
+      case "!ls":
+        try {
+          const path = args || ".";
+          if (!isPathSafe(path)) {
+            return `⚠️ Acesso negado. O caminho "${path}" contém diretórios ou arquivos sensíveis.`;
+          }
+
+          const files = await listDirectory(path);
+
+          // Formatar saída
+          const fileList = files
+            .map((file) => {
+              const type = file.isDirectory ? "DIR" : "FILE";
+              return `[${type}] ${file.name}`;
+            })
+            .join("\n");
+
+          return `Arquivos em "${path}":\n${fileList}`;
+        } catch (error: any) {
+          return `Erro ao listar diretório: ${error.message}`;
+        }
+
+      case "!cat":
+        try {
+          if (!args) {
+            return `Erro: Você precisa especificar um arquivo. Exemplo: !cat src/index.ts`;
+          }
+
+          if (!isPathSafe(args)) {
+            return `⚠️ Acesso negado. O arquivo "${args}" é sensível ou está fora do projeto.`;
+          }
+
+          const content = await readFile(args);
+          if (content === null) {
+            return `Erro: Não foi possível ler o arquivo "${args}".`;
+          }
+
+          return `Conteúdo de "${args}":\n\n\`\`\`\n${content}\n\`\`\``;
+        } catch (error: any) {
+          return `Erro ao ler arquivo: ${error.message}`;
+        }
+
+      case "!tree":
+        try {
+          const path = args || ".";
+          if (!isPathSafe(path)) {
+            return `⚠️ Acesso negado. O caminho "${path}" contém diretórios ou arquivos sensíveis.`;
+          }
+
+          const structure = await getFileStructure(path);
+          return `Estrutura de diretórios para "${path}":\n\n\`\`\`\n${structure}\n\`\`\``;
+        } catch (error: any) {
+          return `Erro ao obter estrutura de diretórios: ${error.message}`;
+        }
+
+      default:
+        return null; // Não é um comando especial
+    }
+  };
+
   // Função para enviar mensagem para a API do ChatGPT
   const sendMessageToChatGPT = async (userMessage: string, messages: ChatMessage[]): Promise<string> => {
     try {
@@ -165,6 +263,40 @@ export async function startChat() {
     }
   };
 
+  // Função para processar solicitação de análise de arquivo
+  const processFileAnalysisRequest = async (userInput: string): Promise<string | null> => {
+    // Expressões regulares para detectar solicitações de análise de arquivo
+    const patterns = [
+      /analis[ae]r?\s+o\s+(?:arquivo|código)\s+(?:em\s+)?['""]?([^'""\s]+)['""]?/i,
+      /ver\s+o\s+(?:arquivo|código)\s+(?:em\s+)?['""]?([^'""\s]+)['""]?/i,
+      /mostr[ae]r?\s+o\s+(?:arquivo|código)\s+(?:em\s+)?['""]?([^'""\s]+)['""]?/i,
+      /examin[ae]r?\s+o\s+(?:arquivo|código)\s+(?:em\s+)?['""]?([^'""\s]+)['""]?/i,
+      /le[ir]?\s+o\s+(?:arquivo|código)\s+(?:em\s+)?['""]?([^'""\s]+)['""]?/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = userInput.match(pattern);
+      if (match && match[1]) {
+        const filePath = match[1];
+
+        // Verificar caminho seguro
+        if (!isPathSafe(filePath)) {
+          return `⚠️ Acesso negado. O arquivo "${filePath}" é sensível ou está fora do projeto.`;
+        }
+
+        // Ler conteúdo do arquivo
+        const content = await readFile(filePath);
+        if (content === null) {
+          return `Não consegui encontrar ou ler o arquivo "${filePath}". Verifique se o caminho está correto.`;
+        }
+
+        return `Conteúdo do arquivo "${filePath}":\n\n\`\`\`\n${content}\n\`\`\`\n\nVocê quer que eu analise este código?`;
+      }
+    }
+
+    return null; // Não é uma solicitação de análise de arquivo
+  };
+
   // Loop principal do chat
   let chatting = true;
   while (chatting) {
@@ -181,6 +313,43 @@ export async function startChat() {
     if (userInput.toLowerCase() === "exit" || userInput.toLowerCase() === "sair") {
       chatting = false;
       break;
+    }
+
+    // Verificar se é um comando especial
+    if (userInput.startsWith("!")) {
+      const commandResult = await processSpecialCommand(userInput);
+      if (commandResult) {
+        console.log(chalk.blue("\nSistema:"));
+        console.log(commandResult);
+        continue; // Não enviar para o ChatGPT, continuar o loop
+      }
+    }
+
+    // Verificar se é uma solicitação de análise de arquivo
+    const fileAnalysisResult = await processFileAnalysisRequest(userInput);
+    if (fileAnalysisResult) {
+      // Adicionar mensagem do usuário à sessão
+      currentSession.messages.push({
+        role: "user",
+        content: userInput,
+      });
+
+      // Adicionar conteúdo do arquivo como resposta do sistema
+      currentSession.messages.push({
+        role: "assistant",
+        content: fileAnalysisResult,
+      });
+
+      console.log(chalk.blue("\nAssistente:"));
+      console.log(fileAnalysisResult);
+
+      // Atualizar timestamp da sessão
+      currentSession.updatedAt = new Date().toISOString();
+
+      // Salvar histórico
+      await saveToHistory(currentSession);
+
+      continue; // Continuar o loop
     }
 
     // Adicionar mensagem do usuário à sessão
