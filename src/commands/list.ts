@@ -15,7 +15,7 @@ interface GitHubIssue {
   state: string;
 }
 
-export const listTasks = async (): Promise<void> => {
+export const listTasks = async (options = { offline: false }): Promise<void> => {
   try {
     const tasksDir = path.join(process.cwd(), ".task", "issues");
 
@@ -50,51 +50,60 @@ export const listTasks = async (): Promise<void> => {
       }
     }
 
-    // Obter issues do GitHub para atualizar estados e informações
-    const githubIssues = await fetchGitHubIssues();
+    // Atualizar com informações do GitHub apenas se não estiver em modo offline
+    if (!options.offline) {
+      try {
+        // Obter issues do GitHub para atualizar estados e informações
+        console.log(chalk.blue("\n🔄 Atualizando informações das tasks do GitHub..."));
+        const githubIssues = await fetchGitHubIssues();
 
-    // Mapa de issue number para estado
-    const issueStates = new Map<number, string>();
-    githubIssues.forEach((issue: GitHubIssue) => {
-      issueStates.set(issue.number, issue.state);
-    });
+        // Mapa de issue number para estado
+        const issueStates = new Map<number, string>();
+        githubIssues.forEach((issue: GitHubIssue) => {
+          issueStates.set(issue.number, issue.state);
+        });
 
-    // Atualizar estado das tarefas locais com base nas issues do GitHub
-    // e buscar informações atualizadas de projeto e milestone
-    console.log(chalk.blue("\n🔄 Atualizando informações das tasks do GitHub..."));
-
-    for (const task of tasks) {
-      if (task.github_issue_number) {
-        // Atualizar estado se disponível no mapa
-        if (issueStates.has(task.github_issue_number)) {
-          task.state = issueStates.get(task.github_issue_number);
-        }
-
-        // Buscar informações detalhadas da issue para milestone atual
-        try {
-          const issue = await fetchGitHubIssue(task.github_issue_number);
-          if (issue) {
-            // Atualizar milestone com valor atual do GitHub
-            task.milestone = issue.milestone?.title || "";
-
-            // Buscar projeto atualizado
-            const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
-            if (projectInfo) {
-              task.project = projectInfo;
-            } else {
-              task.project = "";
+        // Atualizar estado das tarefas locais com base nas issues do GitHub
+        // e buscar informações atualizadas de projeto e milestone
+        for (const task of tasks) {
+          if (task.github_issue_number) {
+            // Atualizar estado se disponível no mapa
+            if (issueStates.has(task.github_issue_number)) {
+              task.state = issueStates.get(task.github_issue_number);
             }
 
-            // Atualizar status com informações do projeto no GitHub
-            const statusFromProject = await extractStatusFromIssue(issue);
-            if (statusFromProject) {
-              task.status = statusFromProject;
+            // Buscar informações detalhadas da issue para milestone atual
+            try {
+              const issue = await fetchGitHubIssue(task.github_issue_number);
+              if (issue) {
+                // Atualizar milestone com valor atual do GitHub
+                task.milestone = issue.milestone?.title || "";
+
+                // Buscar projeto atualizado
+                const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
+                if (projectInfo) {
+                  task.project = projectInfo;
+                } else {
+                  task.project = "";
+                }
+
+                // Atualizar status com informações do projeto no GitHub
+                const statusFromProject = await extractStatusFromIssue(issue);
+                if (statusFromProject) {
+                  task.status = statusFromProject;
+                }
+              }
+            } catch (error) {
+              // Silenciar erro, manter dados locais
             }
           }
-        } catch (error) {
-          // Silenciar erro, manter dados locais
         }
+      } catch (error) {
+        console.error(chalk.yellow("\n⚠️ Erro ao conectar com GitHub. Exibindo informações locais."));
+        console.log(chalk.gray("Para listar sem tentar conectar ao GitHub, use: devtask list --offline"));
       }
+    } else {
+      console.log(chalk.blue("\n📄 Modo offline: exibindo informações armazenadas localmente."));
     }
 
     // Preparar tabela para exibição - usando o mesmo estilo do comando sync
