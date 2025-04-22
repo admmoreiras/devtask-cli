@@ -185,7 +185,7 @@ Tente ser o mais útil possível com base no código que você visualiza.`,
   // Função para processar comandos especiais
   const processSpecialCommand = async (command: string): Promise<string | null> => {
     // Dividir o comando em partes (comando e argumentos)
-    const parts = command.trim().split(/\s+/);
+    const parts: string[] = command.trim().split(/\s+/);
     const cmd = parts[0].toLowerCase();
     const args = parts.slice(1);
 
@@ -413,7 +413,7 @@ Comandos disponíveis:
   // Loop principal do chat
   let chatting = true;
   while (chatting) {
-    const { userInput } = await inquirer.prompt([
+    const { userInput }: { userInput: string } = await inquirer.prompt([
       {
         type: "input",
         name: "userInput",
@@ -473,7 +473,7 @@ Comandos disponíveis:
 
         // Verificar se é um comando de proposta que requer coleta de conteúdo
         if (userInput.startsWith("!propose create")) {
-          const parts = userInput.split(/\s+/);
+          const parts: string[] = userInput.split(/\s+/);
           if (parts.length >= 3) {
             collectingContent = true;
             collectingFor = {
@@ -483,7 +483,7 @@ Comandos disponíveis:
             collectedContent = "";
           }
         } else if (userInput.startsWith("!propose modify")) {
-          const parts = userInput.split(/\s+/);
+          const parts: string[] = userInput.split(/\s+/);
           if (parts.length >= 3) {
             collectingContent = true;
             collectingFor = {
