@@ -1,6 +1,6 @@
-import axios from "axios";
 import dotenv from "dotenv";
 import fs from "fs-extra";
+import OpenAI from "openai";
 import path from "path";
 
 dotenv.config();
@@ -22,14 +22,10 @@ export interface Template {
   tasks?: TaskTemplate[];
 }
 
-// Interface para resposta da OpenAI
-interface OpenAIResponse {
-  choices: {
-    message: {
-      content: string;
-    };
-  }[];
-}
+// Cliente OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // Verifica se a API Key da OpenAI existe
 export function checkOpenAIApiKey(): boolean {
@@ -70,32 +66,23 @@ export async function generateTasksFromInstructions(template: Template): Promise
   }
 
   try {
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-3.5-turbo",
-        messages: [
-          {
-            role: "system",
-            content: "Você é um assistente especializado em quebrar projetos em tarefas menores e bem definidas.",
-          },
-          {
-            role: "user",
-            content: `Com base nas seguintes instruções de projeto, crie uma lista estruturada de tarefas. Cada tarefa deve ter um título claro, descrição detalhada, e ser associada a um projeto/componente e milestone/sprint apropriados:\n\n${template.instructions}\n\nRetorne a resposta como um array JSON com objetos no seguinte formato: { "title": "string", "description": "string", "project": "string", "milestone": "string", "status": "todo" }`,
-          },
-        ],
-        temperature: 0.7,
-        max_tokens: 2500,
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    const response = await openai.chat.completions.create({
+      model: "gpt-4.1",
+      messages: [
+        {
+          role: "system",
+          content: "Você é um assistente especializado em quebrar projetos em tarefas menores e bem definidas.",
         },
-      }
-    );
+        {
+          role: "user",
+          content: `Com base nas seguintes instruções de projeto, crie uma lista estruturada de tarefas. Cada tarefa deve ter um título claro, descrição detalhada, e ser associada a um projeto/componente e milestone/sprint apropriados:\n\n${template.instructions}\n\nRetorne a resposta como um array JSON com objetos no seguinte formato: { "title": "string", "description": "string", "project": "string", "milestone": "string", "status": "todo" }`,
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 2500,
+    });
 
-    const assistantResponse = (response.data as OpenAIResponse).choices[0].message.content;
+    const assistantResponse = response.choices[0].message.content || "";
 
     // Extrai o JSON da resposta
     const jsonMatch = assistantResponse.match(/\[\s*\{.*\}\s*\]/s);

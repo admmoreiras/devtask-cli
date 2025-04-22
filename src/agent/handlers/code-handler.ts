@@ -1,33 +1,13 @@
 // Manipulador para operações relacionadas a código
-import axios from "axios";
+import OpenAI from "openai";
 import { executeCode } from "../../utils/code-executor.js";
 import { Intent } from "../intent-processor.js";
 import { BaseHandler } from "./handler-interface.js";
 
-// Interfaces para tipar a resposta da OpenAI
-interface OpenAIMessage {
-  role: string;
-  content: string;
-}
-
-interface OpenAIChoice {
-  message: OpenAIMessage;
-  index: number;
-  finish_reason: string;
-}
-
-interface OpenAIResponse {
-  id: string;
-  object: string;
-  created: number;
-  model: string;
-  choices: OpenAIChoice[];
-  usage: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
-}
+// Cliente OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 /**
  * Manipulador para intenções relacionadas a código
@@ -101,36 +81,27 @@ ${requirements ? `\nRequisitos adicionais: ${requirements}` : ""}`;
       // Obter mensagens recentes para contexto
       const messages = this.contextManager.getRecentMessages();
 
-      // Enviar solicitação para a API do OpenAI
-      const response = await axios.post<OpenAIResponse>(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          model: "gpt-3.5-turbo",
-          messages: [
-            {
-              role: "system",
-              content:
-                "Você é um assistente especializado em gerar código de alta qualidade. Seu código deve ser limpo, bem documentado e seguir as melhores práticas.",
-            },
-            ...messages,
-            { role: "user", content: prompt },
-          ],
-          temperature: 0.3,
-        },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      // Enviar solicitação para a API do OpenAI usando biblioteca oficial
+      const response = await openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Você é um assistente especializado em gerar código de alta qualidade. Seu código deve ser limpo, bem documentado e seguir as melhores práticas.",
           },
-        }
-      );
+          ...messages,
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.3,
+      });
 
       // Verificar se a resposta contém o conteúdo esperado
-      if (!response.data?.choices?.length || !response.data.choices[0]?.message?.content) {
+      if (!response.choices?.length || !response.choices[0]?.message?.content) {
         return "Não foi possível gerar o código. Resposta inesperada da API.";
       }
 
-      const generatedCode = response.data.choices[0].message.content;
+      const generatedCode = response.choices[0].message.content;
 
       // Retorna o código gerado
       return `Código gerado para: ${description}\n\n${generatedCode}\n\nVocê pode modificar este código conforme necessário ou pedir para executá-lo digitando "execute este código".`;
@@ -183,34 +154,25 @@ ${requirements ? `\nRequisitos adicionais: ${requirements}` : ""}`;
       const prompt = `Analise o seguinte código e identifique possíveis problemas, melhorias e boas práticas:\n\n${codeToAnalyze}`;
 
       // Enviar solicitação para a API do OpenAI
-      const response = await axios.post<OpenAIResponse>(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          model: "gpt-3.5-turbo",
-          messages: [
-            {
-              role: "system",
-              content:
-                "Você é um revisor de código experiente. Analise o código fornecido e identifique problemas, potenciais bugs, oportunidades de melhoria e boas práticas que podem ser aplicadas.",
-            },
-            { role: "user", content: prompt },
-          ],
-          temperature: 0.3,
-        },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      const response = await openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Você é um revisor de código experiente. Analise o código fornecido e identifique problemas, potenciais bugs, oportunidades de melhoria e boas práticas que podem ser aplicadas.",
           },
-        }
-      );
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.3,
+      });
 
       // Verificar se a resposta contém o conteúdo esperado
-      if (!response.data?.choices?.length || !response.data.choices[0]?.message?.content) {
+      if (!response.choices?.length || !response.choices[0]?.message?.content) {
         return "Não foi possível analisar o código. Resposta inesperada da API.";
       }
 
-      const analysis = response.data.choices[0].message.content;
+      const analysis = response.choices[0].message.content;
 
       // Retorna a análise
       return `Análise do código:\n\n${analysis}`;
@@ -237,34 +199,25 @@ ${requirements ? `\nRequisitos adicionais: ${requirements}` : ""}`;
       const prompt = `Explique o seguinte código de forma clara e detalhada:\n\n${codeToExplain}`;
 
       // Enviar solicitação para a API do OpenAI
-      const response = await axios.post<OpenAIResponse>(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          model: "gpt-3.5-turbo",
-          messages: [
-            {
-              role: "system",
-              content:
-                "Você é um professor de programação que explica código de forma clara e acessível. Explique o código fornecido linha por linha, destacando conceitos importantes e funcionalidades.",
-            },
-            { role: "user", content: prompt },
-          ],
-          temperature: 0.3,
-        },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      const response = await openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Você é um professor de programação que explica código de forma clara e acessível. Explique o código fornecido linha por linha, destacando conceitos importantes e funcionalidades.",
           },
-        }
-      );
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.3,
+      });
 
       // Verificar se a resposta contém o conteúdo esperado
-      if (!response.data?.choices?.length || !response.data.choices[0]?.message?.content) {
+      if (!response.choices?.length || !response.choices[0]?.message?.content) {
         return "Não foi possível explicar o código. Resposta inesperada da API.";
       }
 
-      const explanation = response.data.choices[0].message.content;
+      const explanation = response.choices[0].message.content;
 
       // Retorna a explicação
       return `Explicação do código:\n\n${explanation}`;
@@ -288,37 +241,28 @@ ${requirements ? `\nRequisitos adicionais: ${requirements}` : ""}`;
       const codeToOptimize = this.extractCodeFromMarkdown(code);
 
       // Criar uma solicitação para a API do OpenAI
-      const prompt = `Otimize o seguinte código para melhorar a performance, legibilidade e manutenção:\n\n${codeToOptimize}`;
+      const prompt = `Otimize o seguinte código, melhorando sua eficiência, legibilidade e organização:\n\n${codeToOptimize}`;
 
       // Enviar solicitação para a API do OpenAI
-      const response = await axios.post<OpenAIResponse>(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          model: "gpt-3.5-turbo",
-          messages: [
-            {
-              role: "system",
-              content:
-                "Você é um especialista em otimização de código. Refatore o código fornecido para melhorar a performance, legibilidade e manutenção, explicando as melhorias feitas.",
-            },
-            { role: "user", content: prompt },
-          ],
-          temperature: 0.3,
-        },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      const response = await openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Você é um especialista em otimização de código. Melhore o código fornecido, tornando-o mais eficiente, legível e aderente às melhores práticas. Explique as melhorias realizadas.",
           },
-        }
-      );
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.3,
+      });
 
       // Verificar se a resposta contém o conteúdo esperado
-      if (!response.data?.choices?.length || !response.data.choices[0]?.message?.content) {
+      if (!response.choices?.length || !response.choices[0]?.message?.content) {
         return "Não foi possível otimizar o código. Resposta inesperada da API.";
       }
 
-      const optimizedCode = response.data.choices[0].message.content;
+      const optimizedCode = response.choices[0].message.content;
 
       // Retorna o código otimizado
       return `Código otimizado:\n\n${optimizedCode}`;
@@ -342,41 +286,30 @@ ${requirements ? `\nRequisitos adicionais: ${requirements}` : ""}`;
       const codeToDebug = this.extractCodeFromMarkdown(code);
 
       // Criar uma solicitação para a API do OpenAI
-      const prompt = `Depure o seguinte código e corrija os problemas encontrados:
-      
+      const prompt = `Depure o seguinte código e identifique possíveis erros:
 ${codeToDebug}
-      
-${error ? `O erro relatado é: ${error}` : ""}`;
+${error ? `\nErro reportado: ${error}` : ""}`;
 
       // Enviar solicitação para a API do OpenAI
-      const response = await axios.post<OpenAIResponse>(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          model: "gpt-3.5-turbo",
-          messages: [
-            {
-              role: "system",
-              content:
-                "Você é um especialista em depuração de código. Identifique e corrija problemas no código fornecido, explicando o que estava errado e como foi corrigido.",
-            },
-            { role: "user", content: prompt },
-          ],
-          temperature: 0.3,
-        },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      const response = await openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Você é um especialista em depuração de código. Identifique problemas no código fornecido, explique o que está causando os erros e sugira correções.",
           },
-        }
-      );
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.3,
+      });
 
       // Verificar se a resposta contém o conteúdo esperado
-      if (!response.data?.choices?.length || !response.data.choices[0]?.message?.content) {
+      if (!response.choices?.length || !response.choices[0]?.message?.content) {
         return "Não foi possível depurar o código. Resposta inesperada da API.";
       }
 
-      const debugResult = response.data.choices[0].message.content;
+      const debugResult = response.choices[0].message.content;
 
       // Retorna o resultado da depuração
       return `Resultado da depuração:\n\n${debugResult}`;
@@ -386,17 +319,13 @@ ${error ? `O erro relatado é: ${error}` : ""}`;
   }
 
   /**
-   * Extrai o código de um bloco de código markdown
+   * Extrai código de um bloco de código Markdown
    */
   private extractCodeFromMarkdown(code: string): string {
-    // Verificar se o código está em um bloco de código markdown
-    const codeBlockRegex = /```(?:javascript|typescript|js|ts)?\n([\s\S]*?)```/;
+    // Verificar se o código está em um bloco de código
+    const codeBlockRegex = /```(?:\w+)?\s*([\s\S]+?)\s*```/;
     const match = code.match(codeBlockRegex);
 
-    if (match && match[1]) {
-      return match[1];
-    }
-
-    return code;
+    return match ? match[1] : code;
   }
 }

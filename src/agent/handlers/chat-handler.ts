@@ -1,5 +1,5 @@
 // Manipulador para conversas gerais com o assistente
-import axios from "axios";
+import OpenAI from "openai";
 import { Intent } from "../intent-processor.js";
 import { BaseHandler } from "./handler-interface.js";
 
@@ -7,6 +7,11 @@ import { BaseHandler } from "./handler-interface.js";
  * Manipulador para intenções de chat geral
  */
 export class ChatHandler extends BaseHandler {
+  // Cliente OpenAI
+  private openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+
   // Ações suportadas por este manipulador
   private supportedActions = [
     "respond", // Responder a uma pergunta ou comentário
@@ -68,24 +73,15 @@ Funções disponíveis:
 Responda de forma clara, concisa e útil em português brasileiro. Se você não sabe a resposta para algo específico, sugira alternativas úteis.`,
       };
 
-      // Enviar mensagem para a API da OpenAI
-      const response = await axios.post(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          model: "gpt-3.5-turbo",
-          messages: [systemMessage, ...messages],
-          temperature: 0.7,
-          max_tokens: 1000,
-        },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          },
-        }
-      );
+      // Usar a biblioteca oficial do OpenAI
+      const response = await this.openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [systemMessage, ...messages],
+        temperature: 0.7,
+        max_tokens: 1000,
+      });
 
-      return response.data.choices[0].message.content;
+      return response.choices[0].message.content || "Não foi possível gerar uma resposta.";
     } catch (error: any) {
       console.error("Erro ao obter resposta do ChatGPT:", error);
       return "Desculpe, estou tendo dificuldades para processar essa solicitação no momento. Você pode tentar novamente ou reformular sua pergunta?";

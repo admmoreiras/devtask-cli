@@ -1,8 +1,13 @@
 // Processador de intenções para analisar linguagem natural
-import axios from "axios";
 import dotenv from "dotenv";
+import OpenAI from "openai";
 
 dotenv.config();
+
+// Cliente OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // Tipos de intenção que o agente pode processar
 export type IntentType = "task" | "github" | "file" | "code" | "chat";
@@ -13,17 +18,6 @@ export interface Intent {
   action: string;
   parameters: Record<string, any>;
   originalMessage: string;
-}
-
-interface OpenAIResponse {
-  choices: Array<{
-    message?: {
-      function_call?: {
-        name?: string;
-        arguments?: string;
-      };
-    };
-  }>;
 }
 
 /**
@@ -41,39 +35,33 @@ export class IntentProcessor {
       // Preparar funções para a API da OpenAI
       const functions = this.getFunctions();
 
-      // Preparar mensagens para a API da OpenAI
+      // Preparar mensagens para a API da OpenAI com tipagem correta
       const messages = [
         {
-          role: "system",
+          role: "system" as const,
           content:
             "Você é um assistente que analisa mensagens do usuário e identifica suas intenções. " +
             "Você deve extrair a intenção principal, a ação desejada e quaisquer parâmetros relevantes. " +
             "Considere o contexto da conversa ao interpretar mensagens ambíguas ou curtas.",
         },
-        ...context,
-        { role: "user", content: message },
+        ...context.map((msg) => ({
+          role: msg.role as "user" | "assistant" | "system",
+          content: msg.content,
+        })),
+        { role: "user" as const, content: message },
       ];
 
-      // Chamar a API da OpenAI
-      const response = await axios.post<OpenAIResponse>(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          model: "gpt-3.5-turbo-0613",
-          messages,
-          functions,
-          function_call: { name: "extract_intent" },
-          temperature: 0.1,
-        },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          },
-        }
-      );
+      // Chamar a API da OpenAI usando a biblioteca oficial
+      const response = await openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages,
+        functions,
+        function_call: { name: "extract_intent" },
+        temperature: 0.1,
+      });
 
       // Extrair a resposta
-      const functionCall = response.data.choices[0].message?.function_call;
+      const functionCall = response.choices[0].message?.function_call;
 
       if (!functionCall || !functionCall.arguments) {
         throw new Error("Falha ao extrair intenção");

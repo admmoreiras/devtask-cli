@@ -35,6 +35,7 @@ export interface Task {
   github_issue_number?: number;
   lastSyncAt?: string; // Data e hora da última sincronização com GitHub
   state?: string; // Estado da issue no GitHub (open/closed)
+  deleted?: boolean; // Indica se a task foi marcada como excluída
 }
 
 // Interfaces para resposta GraphQL
