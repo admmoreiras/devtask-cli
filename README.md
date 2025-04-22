@@ -1,6 +1,6 @@
 # DevTask CLI
 
-CLI para gerenciamento de tarefas de desenvolvimento com integração ao GitHub e geração automática de tarefas com IA.
+CLI para gerenciamento de tarefas de desenvolvimento com integração ao GitHub, geração automática de tarefas com IA e chat interativo para suporte ao desenvolvimento.
 
 ## Instalação
 
@@ -130,6 +130,81 @@ Gera tarefas automaticamente com base nas instruções do template selecionado u
 - Pré-visualização antes de salvar
 - Integração com o sistema existente de tarefas
 
+### Chat interativo com IA
+
+```bash
+devtask chat
+```
+
+Inicia um prompt interativo para conversar com a IA para ajuda com desenvolvimento. Recursos:
+
+- Interação em tempo real com o ChatGPT para dúvidas de programação
+- Geração de código JavaScript/TypeScript sob demanda
+- Execução direta de código gerado no terminal
+- Histórico de conversas salvo localmente para continuar discussões anteriores
+
+### Limpar histórico de conversas
+
+```bash
+devtask clear-history
+```
+
+Limpa o histórico de conversas salvo em `~/.devtask-cli/history.json`.
+
+## Exemplos de uso do Chat
+
+### Consulta e geração de código
+
+````
+devtask chat
+
+🤖 DevTask Chat - Assistente de Desenvolvimento
+Digite suas perguntas ou comandos. Digite 'exit' para sair.
+
+Você: Como posso ler um arquivo JSON em Node.js?
+
+Assistente: Você pode ler um arquivo JSON em Node.js usando o módulo `fs` (File System) com `require` ou `import`. Aqui está um exemplo:
+
+```javascript
+// Usando require
+const fs = require('fs');
+
+// Ler o arquivo
+fs.readFile('caminho/para/arquivo.json', 'utf8', (err, data) => {
+  if (err) {
+    console.error('Erro ao ler o arquivo:', err);
+    return;
+  }
+
+  // Converter string JSON para objeto JavaScript
+  const jsonData = JSON.parse(data);
+  console.log(jsonData);
+});
+````
+
+Ou uma versão mais moderna com Promises:
+
+```javascript
+// Usando import e promises
+import fs from "fs/promises";
+
+async function lerJson() {
+  try {
+    const data = await fs.readFile("caminho/para/arquivo.json", "utf8");
+    const jsonData = JSON.parse(data);
+    console.log(jsonData);
+  } catch (err) {
+    console.error("Erro ao ler o arquivo:", err);
+  }
+}
+
+lerJson();
+```
+
+Deseja executar este código? (Sim/Não)
+
+````
+
 ## Estrutura
 
 Tasks são armazenadas localmente no diretório `.task/issues` em formato JSON com as seguintes informações:
@@ -145,7 +220,7 @@ Tasks são armazenadas localmente no diretório `.task/issues` em formato JSON c
   "synced": true,
   "github_issue_number": 42
 }
-```
+````
 
 Os templates são armazenados no diretório `.task/templates` em formato JSON com a seguinte estrutura:
 
@@ -156,6 +231,8 @@ Os templates são armazenados no diretório `.task/templates` em formato JSON co
   "instructions": "Instruções detalhadas do projeto..."
 }
 ```
+
+As conversas com a IA são armazenadas em `~/.devtask-cli/history.json`.
 
 Os arquivos de tarefas são nomeados seguindo o padrão:
 
@@ -176,4 +253,5 @@ npm run dev -- list
 npm run dev -- sync
 npm run dev -- init
 npm run dev -- generate
+npm run dev -- chat
 ```
