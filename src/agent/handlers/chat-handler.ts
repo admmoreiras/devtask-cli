@@ -3,18 +3,6 @@ import axios from "axios";
 import { Intent } from "../intent-processor.js";
 import { BaseHandler } from "./handler-interface.js";
 
-interface OpenAIResponse {
-  choices: Array<{
-    message?: {
-      content?: string;
-      function_call?: {
-        name?: string;
-        arguments?: string;
-      };
-    };
-  }>;
-}
-
 /**
  * Manipulador para intenções de chat geral
  */
@@ -81,7 +69,7 @@ Responda de forma clara, concisa e útil em português brasileiro. Se você não
       };
 
       // Enviar mensagem para a API da OpenAI
-      const response = await axios.post<OpenAIResponse>(
+      const response = await axios.post(
         "https://api.openai.com/v1/chat/completions",
         {
           model: "gpt-3.5-turbo",
