@@ -1,6 +1,6 @@
 # DevTask CLI
 
-CLI para gerenciamento de tarefas de desenvolvimento com integração ao GitHub.
+CLI para gerenciamento de tarefas de desenvolvimento com integração ao GitHub e geração automática de tarefas com IA.
 
 ## Instalação
 
@@ -21,12 +21,16 @@ npm link
 
 ## Configuração
 
-Para a integração com GitHub, crie um arquivo `.env` na raiz do projeto com as seguintes variáveis:
+Para a integração com GitHub e OpenAI, crie um arquivo `.env` na raiz do projeto com as seguintes variáveis:
 
 ```
+# GitHub Integration
 GITHUB_TOKEN=seu_token_aqui
 GITHUB_OWNER=seu_usuario_ou_organizacao
 GITHUB_REPO=nome_do_repositorio
+
+# OpenAI Integration
+OPENAI_API_KEY=sua_api_key_aqui
 ```
 
 Para criar um token do GitHub, acesse:
@@ -36,6 +40,12 @@ Para criar um token do GitHub, acesse:
 3. Selecione os seguintes escopos:
    - `repo` (todas permissões)
    - `project` (necessário para integração com GitHub Projects)
+
+Para obter uma chave da API da OpenAI, acesse:
+
+1. [OpenAI Platform](https://platform.openai.com/)
+2. Vá para "API Keys" e crie uma nova chave
+3. Copie a chave e adicione ao seu arquivo `.env`
 
 > **Nota**: A API do GitHub para projetos tem limitações com tokens refinados (fine-grained).
 > Para total compatibilidade, especialmente com projetos, use tokens clássicos.
@@ -95,6 +105,31 @@ devtask info
 
 Lista milestones e projetos disponíveis no GitHub para facilitar a sincronização.
 
+### Criar ou editar template
+
+```bash
+devtask init
+```
+
+Permite criar ou editar templates que serão usados para geração automática de tarefas. Recursos:
+
+- Gestão de múltiplos templates
+- Editor de texto integrado para instruções detalhadas
+- Fácil atualização de templates existentes
+
+### Gerar tarefas a partir de template
+
+```bash
+devtask generate
+```
+
+Gera tarefas automaticamente com base nas instruções do template selecionado usando IA. Recursos:
+
+- Análise de instruções de projeto detalhadas
+- Geração inteligente de tarefas organizadas
+- Pré-visualização antes de salvar
+- Integração com o sistema existente de tarefas
+
 ## Estrutura
 
 Tasks são armazenadas localmente no diretório `.task/issues` em formato JSON com as seguintes informações:
@@ -112,7 +147,17 @@ Tasks são armazenadas localmente no diretório `.task/issues` em formato JSON c
 }
 ```
 
-Os arquivos são nomeados seguindo o padrão:
+Os templates são armazenados no diretório `.task/templates` em formato JSON com a seguinte estrutura:
+
+```json
+{
+  "name": "default",
+  "description": "Template padrão para geração de tarefas",
+  "instructions": "Instruções detalhadas do projeto..."
+}
+```
+
+Os arquivos de tarefas são nomeados seguindo o padrão:
 
 - Para tasks não sincronizadas: `ID-titulo-da-task.json`
 - Para tasks sincronizadas: `#NUMERO-ID-titulo-da-task.json`
@@ -129,4 +174,6 @@ npm run dev -- [comando]
 npm run dev -- create
 npm run dev -- list
 npm run dev -- sync
+npm run dev -- init
+npm run dev -- generate
 ```

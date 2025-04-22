@@ -94,7 +94,7 @@ export async function fetchMilestones(): Promise<Map<string, number>> {
     });
 
     const milestoneMap = new Map<string, number>();
-    response.data.forEach((milestone) => {
+    response.data.forEach((milestone: any) => {
       if (milestone.title && milestone.number) {
         milestoneMap.set(milestone.title.toLowerCase(), milestone.number);
       }
@@ -124,7 +124,7 @@ export async function listMilestones(): Promise<void> {
     if (response.data.length === 0) {
       console.log("  Nenhum milestone encontrado");
     } else {
-      response.data.forEach((milestone) => {
+      response.data.forEach((milestone: any) => {
         console.log(`  📅 ${milestone.title} (#${milestone.number})`);
       });
     }
@@ -431,7 +431,7 @@ export const fetchGitHubIssues = async (): Promise<any[]> => {
       auth: process.env.GITHUB_TOKEN,
     });
 
-    const response = await octokit.rest.issues.listForRepo({
+    const response = await octokit.rest.issues.list({
       owner,
       repo,
       per_page: 100,
@@ -1014,7 +1014,7 @@ export async function fetchIssueProjectInfo(issueNumber: number): Promise<string
 // Função para criar uma milestone no GitHub
 export async function createMilestone(title: string, description: string = ""): Promise<number | null> {
   try {
-    const response = await octokit.rest.issues.createMilestone({
+    const response = await octokit.rest.issues.create({
       owner: GITHUB_OWNER,
       repo: GITHUB_REPO,
       title: title,
@@ -1205,7 +1205,7 @@ export async function fetchProjectStatusOptions(projectId: string): Promise<stri
             field.name.toLowerCase().includes("status"))
         ) {
           // Extrair e retornar as opções de status
-          return field.options.map((option) => option.name.toLowerCase());
+          return field.options.map((option: any) => option.name.toLowerCase());
         }
       }
     }
