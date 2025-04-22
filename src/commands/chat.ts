@@ -15,6 +15,15 @@ interface ChatSession {
   updatedAt: string;
 }
 
+// Interface para tipagem da resposta da OpenAI
+interface OpenAIResponse {
+  choices: Array<{
+    message: {
+      content: string;
+    };
+  }>;
+}
+
 // Função principal do chat
 export async function startChat() {
   // Verificar se a API Key do OpenAI está configurada
@@ -131,7 +140,7 @@ export async function startChat() {
       // Importar dinamicamente para compatibilidade com ESM
       const { default: axios } = await import("axios");
 
-      const response = await axios.post(
+      const response = await axios.post<OpenAIResponse>(
         "https://api.openai.com/v1/chat/completions",
         {
           model: "gpt-3.5-turbo",
