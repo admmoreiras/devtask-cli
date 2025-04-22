@@ -130,7 +130,7 @@ Gera tarefas automaticamente com base nas instruções do template selecionado u
 - Pré-visualização antes de salvar
 - Integração com o sistema existente de tarefas
 
-### Chat interativo com IA
+### Chat interativo com IA e File Agent
 
 ```bash
 devtask chat
@@ -142,28 +142,109 @@ Inicia um prompt interativo para conversar com a IA para ajuda com desenvolvimen
 - Geração de código JavaScript/TypeScript sob demanda
 - Execução direta de código gerado no terminal
 - Histórico de conversas salvo localmente para continuar discussões anteriores
-- **NOVO**: Exploração e análise de arquivos do projeto direto pelo chat
+- Exploração e análise de arquivos do projeto direto pelo chat
+- **NOVO**: Agente de arquivos que pode propor e aplicar mudanças em seu projeto
+
+#### Comandos do File Agent
+
+Durante a sessão de chat, além de explorar arquivos, você pode usar os comandos do File Agent para propor e aplicar mudanças no seu projeto:
+
+- `!propose create [caminho]` - Propõe a criação de um novo arquivo
+- `!propose modify [caminho]` - Propõe a modificação de um arquivo existente
+- `!propose delete [caminho]` - Propõe a exclusão de um arquivo
+- `!changes` - Mostra todas as alterações propostas pendentes
+- `!apply` - Aplica todas as alterações propostas ao sistema de arquivos
+- `!cancel` - Cancela todas as alterações propostas
+
+Ao usar os comandos `!propose create` ou `!propose modify`, o sistema pedirá o conteúdo do arquivo. Digite o conteúdo e finalize com `!endcontent` em uma linha separada.
+
+#### Exemplo de uso do File Agent
+
+```
+Você: Crie um arquivo de configuração básico para o ESLint
+
+Assistente: [análise e sugere uma configuração]
+Para criar esta configuração, você pode usar o seguinte comando:
+
+!propose create .eslintrc.json
+```
+
+{
+"env": {
+"browser": true,
+"es2021": true,
+"node": true
+},
+"extends": [
+"eslint:recommended",
+"plugin:@typescript-eslint/recommended"
+],
+"parser": "@typescript-eslint/parser",
+"parserOptions": {
+"ecmaVersion": "latest",
+"sourceType": "module"
+},
+"plugins": [
+"@typescript-eslint"
+],
+"rules": {
+"indent": ["error", 2],
+"quotes": ["error", "double"],
+"semi": ["error", "always"]
+}
+}
+
+```
+
+Você: !changes
+
+Sistema:
+📝 Alterações Pendentes:
+
+✨ CRIAR: .eslintrc.json
+----------------------------------------
+{
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "node": true
+  },
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "plugins": [
+    "@typescript-eslint"
+  ],
+  "rules": {
+    "indent": ["error", 2],
+    "quotes": ["error", "double"],
+    "semi": ["error", "always"]
+  }
+}
+----------------------------------------
+
+Para aplicar essas alterações, digite: !apply
+Para descartar essas alterações, digite: !cancel
+
+Você: !apply
+
+Sistema: ✅ Alterações aplicadas com sucesso: 1 arquivos criados, 0 modificados, 0 excluídos.
+```
 
 #### Comandos do explorador de arquivos no chat
 
-Durante a sessão de chat, você pode usar os seguintes comandos para interagir com os arquivos do projeto:
+Você também pode continuar usando os comandos originais para navegar e explorar arquivos:
 
 - `!ls [caminho]` - Lista arquivos e diretórios no caminho especificado
 - `!cat [arquivo]` - Mostra o conteúdo de um arquivo
 - `!tree [caminho]` - Mostra a estrutura de diretórios em forma de árvore
 - `!help` - Mostra a lista de comandos disponíveis
-
-Além disso, você pode pedir ao assistente para analisar arquivos usando linguagem natural:
-
-```
-Você: analise o arquivo src/index.ts
-Assistente: [exibe o conteúdo do arquivo e oferece análise]
-
-Você: mostre o código em src/commands/create.ts
-Assistente: [exibe o conteúdo do arquivo]
-```
-
-O sistema detecta automaticamente estas solicitações e exibe o conteúdo do arquivo para análise.
 
 ### Limpar histórico de conversas
 
@@ -209,9 +290,9 @@ Os arquivos de tarefas são nomeados seguindo o padrão:
 
 Onde `NUMERO` é o número da issue no GitHub.
 
-## Segurança no explorador de arquivos
+## Segurança no explorador de arquivos e File Agent
 
-O explorador de arquivos integrado inclui medidas de segurança para garantir que:
+O explorador de arquivos e o File Agent incluem medidas de segurança para garantir que:
 
 - Apenas arquivos dentro do diretório do projeto sejam acessíveis
 - Arquivos e diretórios sensíveis (como `.env`, `.git`, `node_modules`) sejam bloqueados

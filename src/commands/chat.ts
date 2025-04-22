@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { executeCode } from "../utils/code-executor.js";
+import { fileAgent } from "../utils/file-agent.js";
 import { getFileStructure, isPathSafe, listDirectory, readFile } from "../utils/file-explorer.js";
 import { getHistory, saveToHistory } from "../utils/history.js";
 import { checkOpenAIApiKey } from "../utils/openai.js";
@@ -39,6 +40,10 @@ export async function startChat() {
   console.log(chalk.yellow("  !ls [caminho] - Lista arquivos e diretórios"));
   console.log(chalk.yellow("  !cat [arquivo] - Mostra o conteúdo de um arquivo"));
   console.log(chalk.yellow("  !tree [caminho] - Mostra a estrutura de diretórios"));
+  console.log(chalk.yellow("  !propose [action] [path] - Propõe uma alteração em um arquivo"));
+  console.log(chalk.yellow("  !apply - Aplica as alterações propostas"));
+  console.log(chalk.yellow("  !cancel - Cancela as alterações propostas"));
+  console.log(chalk.yellow("  !changes - Mostra as alterações propostas"));
   console.log(chalk.yellow("  !help - Mostra todos os comandos disponíveis\n"));
 
   // Opcionalmente carregar histórico anterior
@@ -60,8 +65,29 @@ export async function startChat() {
   // Adicionar mensagem do sistema para contextualizar sobre o projeto
   currentSession.messages.push({
     role: "system",
-    content:
-      "Você é um assistente de desenvolvimento que pode analisar código e arquivos do projeto atual. O usuário pode pedir para você analisar arquivos específicos ou a estrutura do projeto. Tente ser o mais útil possível com base no código que você visualiza.",
+    content: `Você é um assistente de desenvolvimento avançado que pode analisar código e arquivos do projeto atual. 
+Você também pode propor e aplicar alterações em arquivos.
+
+Quando o usuário pedir para você fazer uma alteração, sugira o código completo e explique as mudanças.
+Em seguida, ofereça aplicar a alteração usando os comandos !propose. Exemplos:
+
+Para criar um arquivo:
+!propose create caminho/do/arquivo
+\`\`\`
+conteúdo do arquivo
+\`\`\`
+
+Para modificar um arquivo:
+!propose modify caminho/do/arquivo
+\`\`\`
+novo conteúdo completo do arquivo
+\`\`\`
+
+Para excluir um arquivo:
+!propose delete caminho/do/arquivo
+
+Após propor alterações, o usuário pode digitar !apply para aplicá-las ou !cancel para cancelá-las.
+Tente ser o mais útil possível com base no código que você visualiza.`,
   });
 
   if (useHistory.loadHistory) {
@@ -161,7 +187,7 @@ export async function startChat() {
     // Dividir o comando em partes (comando e argumentos)
     const parts = command.trim().split(/\s+/);
     const cmd = parts[0].toLowerCase();
-    const args = parts.slice(1).join(" ");
+    const args = parts.slice(1);
 
     switch (cmd) {
       case "!help":
@@ -170,11 +196,17 @@ Comandos disponíveis:
 - !ls [caminho] - Lista arquivos e diretórios
 - !cat [arquivo] - Mostra o conteúdo de um arquivo
 - !tree [caminho] - Mostra a estrutura de diretórios
+- !propose create [caminho] - Propõe a criação de um arquivo (seguido pelo conteúdo)
+- !propose modify [caminho] - Propõe a modificação de um arquivo (seguido pelo novo conteúdo)
+- !propose delete [caminho] - Propõe a exclusão de um arquivo
+- !changes - Mostra as alterações propostas pendentes
+- !apply - Aplica as alterações propostas
+- !cancel - Cancela as alterações propostas
 - !help - Mostra esta ajuda`;
 
       case "!ls":
         try {
-          const path = args || ".";
+          const path = args.join(" ") || ".";
           if (!isPathSafe(path)) {
             return `⚠️ Acesso negado. O caminho "${path}" contém diretórios ou arquivos sensíveis.`;
           }
@@ -196,27 +228,28 @@ Comandos disponíveis:
 
       case "!cat":
         try {
-          if (!args) {
+          const filePath = args.join(" ");
+          if (!filePath) {
             return `Erro: Você precisa especificar um arquivo. Exemplo: !cat src/index.ts`;
           }
 
-          if (!isPathSafe(args)) {
-            return `⚠️ Acesso negado. O arquivo "${args}" é sensível ou está fora do projeto.`;
+          if (!isPathSafe(filePath)) {
+            return `⚠️ Acesso negado. O arquivo "${filePath}" é sensível ou está fora do projeto.`;
           }
 
-          const content = await readFile(args);
+          const content = await readFile(filePath);
           if (content === null) {
-            return `Erro: Não foi possível ler o arquivo "${args}".`;
+            return `Erro: Não foi possível ler o arquivo "${filePath}".`;
           }
 
-          return `Conteúdo de "${args}":\n\n\`\`\`\n${content}\n\`\`\``;
+          return `Conteúdo de "${filePath}":\n\n\`\`\`\n${content}\n\`\`\``;
         } catch (error: any) {
           return `Erro ao ler arquivo: ${error.message}`;
         }
 
       case "!tree":
         try {
-          const path = args || ".";
+          const path = args.join(" ") || ".";
           if (!isPathSafe(path)) {
             return `⚠️ Acesso negado. O caminho "${path}" contém diretórios ou arquivos sensíveis.`;
           }
@@ -225,6 +258,81 @@ Comandos disponíveis:
           return `Estrutura de diretórios para "${path}":\n\n\`\`\`\n${structure}\n\`\`\``;
         } catch (error: any) {
           return `Erro ao obter estrutura de diretórios: ${error.message}`;
+        }
+
+      case "!propose":
+        // Verificar se há alterações pendentes
+        if (fileAgent.hasPendingChanges()) {
+          return `⚠️ Já existem alterações pendentes. Use !apply para aplicá-las ou !cancel para cancelá-las antes de propor novas alterações.`;
+        }
+
+        // Verificar se a ação e o caminho foram especificados
+        if (args.length < 2) {
+          return `Erro: Uso incorreto do comando. Exemplos:\n!propose create arquivo.txt\n!propose modify arquivo.txt\n!propose delete arquivo.txt`;
+        }
+
+        const action = args[0].toLowerCase();
+        const filePath = args.slice(1).join(" ");
+
+        if (!isPathSafe(filePath)) {
+          return `⚠️ Acesso negado. O caminho "${filePath}" contém diretórios ou arquivos sensíveis.`;
+        }
+
+        // Processar conforme a ação
+        switch (action) {
+          case "create":
+            try {
+              // Aguardar o próximo input do usuário para o conteúdo
+              return `Por favor, digite o conteúdo do arquivo "${filePath}" a ser criado:\n(Digite '!endcontent' em uma linha separada quando terminar)`;
+            } catch (error: any) {
+              return `Erro ao propor criação de arquivo: ${error.message}`;
+            }
+
+          case "modify":
+            try {
+              // Aguardar o próximo input do usuário para o novo conteúdo
+              return `Por favor, digite o novo conteúdo do arquivo "${filePath}":\n(Digite '!endcontent' em uma linha separada quando terminar)`;
+            } catch (error: any) {
+              return `Erro ao propor modificação de arquivo: ${error.message}`;
+            }
+
+          case "delete":
+            try {
+              const success = await fileAgent.proposeDelete(filePath);
+              if (success) {
+                return `✅ Exclusão do arquivo "${filePath}" proposta com sucesso.\nDigite !changes para ver as alterações pendentes.\nDigite !apply para aplicar ou !cancel para cancelar.`;
+              } else {
+                return `❌ Não foi possível propor a exclusão do arquivo "${filePath}".`;
+              }
+            } catch (error: any) {
+              return `Erro ao propor exclusão de arquivo: ${error.message}`;
+            }
+
+          default:
+            return `Ação inválida: ${action}. Use 'create', 'modify' ou 'delete'.`;
+        }
+
+      case "!changes":
+        return await fileAgent.showPendingChanges();
+
+      case "!apply":
+        try {
+          const result = await fileAgent.applyChanges();
+          return result.message;
+        } catch (error: any) {
+          return `Erro ao aplicar alterações: ${error.message}`;
+        }
+
+      case "!cancel":
+        try {
+          if (!fileAgent.hasPendingChanges()) {
+            return `Não há alterações pendentes para cancelar.`;
+          }
+
+          fileAgent.clearPendingChanges();
+          return `✅ Todas as alterações pendentes foram canceladas.`;
+        } catch (error: any) {
+          return `Erro ao cancelar alterações: ${error.message}`;
         }
 
       default:
@@ -297,6 +405,11 @@ Comandos disponíveis:
     return null; // Não é uma solicitação de análise de arquivo
   };
 
+  // Estado para controlar se está coletando conteúdo para uma operação de arquivo
+  let collectingContent = false;
+  let collectingFor: { action: "create" | "modify"; path: string } | null = null;
+  let collectedContent = "";
+
   // Loop principal do chat
   let chatting = true;
   while (chatting) {
@@ -304,7 +417,7 @@ Comandos disponíveis:
       {
         type: "input",
         name: "userInput",
-        message: chalk.green("Você:"),
+        message: collectingContent ? chalk.green(`Conteúdo para ${collectingFor?.path}:`) : chalk.green("Você:"),
         prefix: "",
       },
     ]);
@@ -315,12 +428,72 @@ Comandos disponíveis:
       break;
     }
 
+    // Se estiver coletando conteúdo para uma operação de arquivo
+    if (collectingContent && collectingFor) {
+      if (userInput === "!endcontent") {
+        // Finalizar coleta de conteúdo
+        collectingContent = false;
+
+        let success = false;
+        let message = "";
+
+        if (collectingFor.action === "create") {
+          success = await fileAgent.proposeCreate(collectingFor.path, collectedContent);
+          message = success
+            ? `✅ Criação do arquivo "${collectingFor.path}" proposta com sucesso.\nDigite !changes para ver as alterações pendentes.\nDigite !apply para aplicar ou !cancel para cancelar.`
+            : `❌ Não foi possível propor a criação do arquivo "${collectingFor.path}".`;
+        } else if (collectingFor.action === "modify") {
+          success = await fileAgent.proposeModify(collectingFor.path, collectedContent);
+          message = success
+            ? `✅ Modificação do arquivo "${collectingFor.path}" proposta com sucesso.\nDigite !changes para ver as alterações pendentes.\nDigite !apply para aplicar ou !cancel para cancelar.`
+            : `❌ Não foi possível propor a modificação do arquivo "${collectingFor.path}".`;
+        }
+
+        console.log(chalk.blue("\nSistema:"));
+        console.log(message);
+
+        // Limpar variáveis de coleta
+        collectingFor = null;
+        collectedContent = "";
+
+        continue;
+      } else {
+        // Adicionar linha ao conteúdo coletado
+        collectedContent += (collectedContent ? "\n" : "") + userInput;
+        continue;
+      }
+    }
+
     // Verificar se é um comando especial
     if (userInput.startsWith("!")) {
       const commandResult = await processSpecialCommand(userInput);
       if (commandResult) {
         console.log(chalk.blue("\nSistema:"));
         console.log(commandResult);
+
+        // Verificar se é um comando de proposta que requer coleta de conteúdo
+        if (userInput.startsWith("!propose create")) {
+          const parts = userInput.split(/\s+/);
+          if (parts.length >= 3) {
+            collectingContent = true;
+            collectingFor = {
+              action: "create",
+              path: parts.slice(2).join(" "),
+            };
+            collectedContent = "";
+          }
+        } else if (userInput.startsWith("!propose modify")) {
+          const parts = userInput.split(/\s+/);
+          if (parts.length >= 3) {
+            collectingContent = true;
+            collectingFor = {
+              action: "modify",
+              path: parts.slice(2).join(" "),
+            };
+            collectedContent = "";
+          }
+        }
+
         continue; // Não enviar para o ChatGPT, continuar o loop
       }
     }
