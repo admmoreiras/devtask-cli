@@ -31,6 +31,9 @@ GITHUB_REPO=nome_do_repositorio
 
 # OpenAI Integration
 OPENAI_API_KEY=sua_api_key_aqui
+
+# Debug Mode (opcional)
+DEBUG_INTENT=true
 ```
 
 Para criar um token do GitHub, acesse:
@@ -266,6 +269,7 @@ Inicia um agente interativo que permite interagir com o sistema usando linguagem
 - Interpretação inteligente de solicitações mesmo em linguagem coloquial
 - Suporte para todas as funcionalidades do sistema através de linguagem humana
 - Detecção automática de intenções para tarefas, GitHub, arquivos e código
+- **NOVO**: Melhor compreensão do contexto da conversa para referências a arquivos e diretórios
 
 Exemplos de comandos que você pode usar:
 
@@ -275,6 +279,8 @@ Exemplos de comandos que você pode usar:
 > cria uma nova tarefa para implementar login
 > sincroniza com o GitHub
 > o que tem no arquivo index.ts
+> modifica esse arquivo para adicionar um novo comando
+> mostra os arquivos da pasta onde está esse arquivo
 ```
 
 Para sair, basta digitar `sair` ou `exit`. Para ver a lista de capacidades, digite `ajuda` ou `help`.
@@ -352,4 +358,5 @@ npm run dev -- sync
 npm run dev -- init
 npm run dev -- generate
 npm run dev -- chat
+npm run dev -- agent
 ```

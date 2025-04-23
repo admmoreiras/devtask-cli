@@ -83,6 +83,14 @@ export class FileHandler extends BaseHandler {
     try {
       const files = await listDirectory(path);
 
+      // Atualizar o estado com o diretório atual
+      this.contextManager.updateState({
+        type: "file",
+        action: "list",
+        parameters: { path },
+        originalMessage: "",
+      });
+
       if (files.length === 0) {
         return `O diretório "${path}" está vazio.`;
       }
@@ -97,7 +105,10 @@ export class FileHandler extends BaseHandler {
 
       return `Arquivos em "${path}":\n\n${fileList}`;
     } catch (error: any) {
-      return `Erro ao listar diretório: ${error.message}`;
+      if (error.message.includes("ENOENT")) {
+        return `O diretório "${path}" não existe. Por favor, verifique se o caminho está correto.`;
+      }
+      return `Erro ao listar diretório "${path}": ${error.message}`;
     }
   }
 
@@ -108,9 +119,22 @@ export class FileHandler extends BaseHandler {
     const filePath = intent.parameters.path;
 
     if (!filePath) {
-      return "Por favor, especifique o caminho do arquivo que deseja ler.";
+      // Verificar o estado para ver se temos um arquivo atual
+      const currentFile = this.contextManager.getState().currentFile;
+      if (currentFile) {
+        return await this.readFileWithPath(currentFile);
+      } else {
+        return "Por favor, especifique o caminho do arquivo que deseja ler. Exemplo: 'ler src/index.ts'";
+      }
     }
 
+    return await this.readFileWithPath(filePath);
+  }
+
+  /**
+   * Método auxiliar para ler um arquivo com o caminho fornecido
+   */
+  private async readFileWithPath(filePath: string): Promise<string> {
     if (!isPathSafe(filePath)) {
       return `⚠️ Acesso negado. O arquivo "${filePath}" é sensível ou está fora do projeto.`;
     }
@@ -119,12 +143,20 @@ export class FileHandler extends BaseHandler {
       const content = await readFile(filePath);
 
       if (content === null) {
-        return `Erro: Não foi possível ler o arquivo "${filePath}".`;
+        return `Não consegui encontrar ou ler o arquivo "${filePath}". Por favor, verifique se o caminho está correto.`;
       }
+
+      // Atualizar o estado com o arquivo atual
+      this.contextManager.updateState({
+        type: "file",
+        action: "read",
+        parameters: { path: filePath },
+        originalMessage: "",
+      });
 
       return `Conteúdo de "${filePath}":\n\n\`\`\`\n${content}\n\`\`\``;
     } catch (error: any) {
-      return `Erro ao ler arquivo: ${error.message}`;
+      return `Não foi possível ler o arquivo "${filePath}": ${error.message}`;
     }
   }
 
@@ -197,13 +229,29 @@ export class FileHandler extends BaseHandler {
     const content = intent.parameters.content;
 
     if (!filePath) {
-      return "Por favor, especifique o caminho do arquivo que deseja modificar.";
+      // Verificar se temos um arquivo atual no contexto
+      const currentFile = this.contextManager.getState().currentFile;
+      if (currentFile) {
+        if (!content) {
+          return `Para modificar o arquivo "${currentFile}", preciso que você forneça o novo conteúdo. Por favor, digite o conteúdo completo que deseja usar.`;
+        }
+        return await this.modifyFileWithPath(currentFile, content);
+      } else {
+        return "Por favor, especifique o caminho do arquivo que deseja modificar.";
+      }
     }
 
     if (!content) {
-      return "Por favor, forneça o novo conteúdo do arquivo.";
+      return `Para modificar o arquivo "${filePath}", preciso que você forneça o novo conteúdo. Por favor, digite o conteúdo completo que deseja usar.`;
     }
 
+    return await this.modifyFileWithPath(filePath, content);
+  }
+
+  /**
+   * Método auxiliar para modificar um arquivo com o caminho e conteúdo fornecidos
+   */
+  private async modifyFileWithPath(filePath: string, content: string): Promise<string> {
     if (!isPathSafe(filePath)) {
       return `⚠️ Acesso negado. O caminho "${filePath}" contém diretórios ou arquivos sensíveis.`;
     }
@@ -212,9 +260,9 @@ export class FileHandler extends BaseHandler {
       const success = await fileAgent.proposeModify(filePath, content);
 
       if (success) {
-        return `✅ Modificação do arquivo "${filePath}" proposta com sucesso.\n\nPara ver as alterações pendentes, digite "mostrar alterações pendentes".\nPara aplicar as alterações, digite "aplicar alterações".\nPara cancelar, digite "cancelar alterações".`;
+        return `✅ Propus a modificação do arquivo "${filePath}".\n\nPara ver como ficará a alteração, digite "mostrar alterações".\nPara aplicar, digite "aplicar alterações".\nPara cancelar, digite "cancelar alterações".`;
       } else {
-        return `❌ Não foi possível propor a modificação do arquivo "${filePath}".`;
+        return `❌ Não foi possível propor a modificação do arquivo "${filePath}". O arquivo pode não existir ou não ser acessível.`;
       }
     } catch (error: any) {
       return `Erro ao propor modificação de arquivo: ${error.message}`;

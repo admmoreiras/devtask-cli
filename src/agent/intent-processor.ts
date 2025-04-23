@@ -71,6 +71,8 @@ export class IntentProcessor {
             "2. Quando o usuário quer ver arquivos em um diretório, a intenção é 'file' com ação 'list'.\n" +
             "3. Sempre extraia o caminho do arquivo/diretório inteiro, incluindo extensões se presentes.\n" +
             "4. NUNCA omita o caminho completo mencionado pelo usuário nos parâmetros.\n" +
+            "5. Preste muita atenção ao contexto da conversa. Se o usuário mencionar 'este arquivo' ou 'este diretório', \n" +
+            "   refere-se provavelmente ao último arquivo ou diretório mencionado anteriormente na conversa.\n" +
             "\n" +
             "Seja flexível com a linguagem natural. Priorize o entendimento da intenção, mesmo quando o usuário não usa os termos exatos.",
         },
@@ -109,7 +111,7 @@ export class IntentProcessor {
       };
 
       // Aplicar correções adicionais se necessário
-      return this.postProcessIntent(intent, message);
+      return this.postProcessIntent(intent, message, context);
     } catch (error: any) {
       console.error("Erro ao processar intenção:", error);
       // Fallback para intenção de chat genérica
@@ -132,10 +134,47 @@ export class IntentProcessor {
 
   /**
    * Faz correções adicionais na intenção para casos que a IA não extrai corretamente
+   * @param intent Intenção detectada
+   * @param originalMessage Mensagem original do usuário
+   * @param context Contexto da conversa
+   * @returns Intenção corrigida
    */
-  private postProcessIntent(intent: Intent, originalMessage: string): Intent {
+  private postProcessIntent(
+    intent: Intent,
+    originalMessage: string,
+    context: Array<{ role: string; content: string }>
+  ): Intent {
     // Normalizar a mensagem para processamento
     const normalizedMessage = originalMessage.toLowerCase();
+
+    // Verificar referências a elementos no contexto (este arquivo, este diretório, etc.)
+    if (
+      normalizedMessage.includes("este arquivo") ||
+      normalizedMessage.includes("esse arquivo") ||
+      normalizedMessage.includes("o mesmo arquivo") ||
+      normalizedMessage.includes("o arquivo") ||
+      normalizedMessage.includes("modificar")
+    ) {
+      // Buscar arquivo mais recente no contexto
+      const recentFile = this.findMostRecentFileReference(context);
+
+      if (recentFile) {
+        if (normalizedMessage.includes("modificar") || normalizedMessage.includes("editar")) {
+          intent.type = "file";
+          intent.action = "modify";
+          intent.parameters.path = recentFile;
+        } else if (
+          normalizedMessage.includes("ler") ||
+          normalizedMessage.includes("ver") ||
+          normalizedMessage.includes("mostrar") ||
+          normalizedMessage.includes("conteúdo")
+        ) {
+          intent.type = "file";
+          intent.action = "read";
+          intent.parameters.path = recentFile;
+        }
+      }
+    }
 
     // Tratamento especial para comandos de listagem de diretórios
     if (
@@ -154,6 +193,20 @@ export class IntentProcessor {
         // É provavelmente uma intenção de listagem de diretório
         intent.type = "file";
         intent.action = "list";
+
+        // Se referir a "este diretório" ou similar, buscar no contexto
+        if (
+          normalizedMessage.includes("este diretório") ||
+          normalizedMessage.includes("essa pasta") ||
+          normalizedMessage.includes("essa diretório") ||
+          normalizedMessage.includes("este pasta")
+        ) {
+          const recentDir = this.findMostRecentDirectoryReference(context);
+          if (recentDir) {
+            intent.parameters.path = recentDir;
+            return intent;
+          }
+        }
 
         // Tentar extrair o caminho do diretório
         let directoryPath = this.extractDirectoryPath(normalizedMessage);
@@ -209,6 +262,100 @@ export class IntentProcessor {
     }
 
     return intent;
+  }
+
+  /**
+   * Encontra a referência ao arquivo mais recente no contexto da conversa
+   * @param context Mensagens do contexto
+   * @returns Caminho do arquivo ou null
+   */
+  private findMostRecentFileReference(context: Array<{ role: string; content: string }>): string | null {
+    // Percorrer o contexto de trás para frente para encontrar a referência mais recente
+    for (let i = context.length - 1; i >= 0; i--) {
+      const message = context[i];
+
+      // Buscamos por duas coisas:
+      // 1. Uma mensagem do assistente que mostra o conteúdo de um arquivo
+      if (message.role === "assistant" && message.content.includes("Conteúdo de")) {
+        const match = message.content.match(/Conteúdo de "(.*?)"/i);
+        if (match && match[1]) {
+          return match[1];
+        }
+      }
+
+      // 2. Uma intenção de leitura de arquivo na mensagem do usuário
+      if (message.role === "user") {
+        // Procurar por padrões que indicam que o usuário estava pedindo para ler um arquivo
+        const filePatterns = [
+          /ler\s+(?:o\s+)?(?:arquivo\s+)?(\S+\.[a-zA-Z0-9]+)/i,
+          /ver\s+(?:o\s+)?(?:arquivo\s+)?(\S+\.[a-zA-Z0-9]+)/i,
+          /mostrar\s+(?:o\s+)?(?:arquivo\s+)?(\S+\.[a-zA-Z0-9]+)/i,
+          /conteúdo\s+(?:do\s+)?(?:arquivo\s+)?(\S+\.[a-zA-Z0-9]+)/i,
+        ];
+
+        for (const pattern of filePatterns) {
+          const match = message.content.match(pattern);
+          if (match && match[1]) {
+            return match[1];
+          }
+        }
+
+        // Verificar se tem algum caminho de arquivo com extensão na mensagem
+        const filePathMatch = message.content.match(/\b(\S+\.[a-zA-Z0-9]+)\b/);
+        if (filePathMatch && filePathMatch[1]) {
+          return filePathMatch[1];
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Encontra a referência ao diretório mais recente no contexto da conversa
+   * @param context Mensagens do contexto
+   * @returns Caminho do diretório ou null
+   */
+  private findMostRecentDirectoryReference(context: Array<{ role: string; content: string }>): string | null {
+    // Percorrer o contexto de trás para frente para encontrar a referência mais recente
+    for (let i = context.length - 1; i >= 0; i--) {
+      const message = context[i];
+
+      // Buscamos por duas coisas:
+      // 1. Uma mensagem do assistente que lista arquivos de um diretório
+      if (message.role === "assistant" && message.content.includes("Arquivos em")) {
+        const match = message.content.match(/Arquivos em "(.*?)"/i);
+        if (match && match[1]) {
+          return match[1];
+        }
+      }
+
+      // 2. Uma intenção de listagem de diretório na mensagem do usuário
+      if (message.role === "user") {
+        // Procurar por padrões que indicam que o usuário estava pedindo para listar um diretório
+        const dirPatterns = [
+          /listar\s+(?:o\s+)?(?:diretório|pasta)\s+(\S+)/i,
+          /ver\s+(?:o\s+)?(?:diretório|pasta)\s+(\S+)/i,
+          /mostrar\s+(?:o\s+)?(?:diretório|pasta)\s+(\S+)/i,
+          /arquivos\s+(?:do|da|de)\s+(\S+)/i,
+        ];
+
+        for (const pattern of dirPatterns) {
+          const match = message.content.match(pattern);
+          if (match && match[1]) {
+            return match[1];
+          }
+        }
+
+        // Verificar se há algum caminho de diretório na mensagem
+        const dirPathMatch = message.content.match(/\b(\S+\/)\b/);
+        if (dirPathMatch && dirPathMatch[1]) {
+          return dirPathMatch[1];
+        }
+      }
+    }
+
+    return null;
   }
 
   /**
