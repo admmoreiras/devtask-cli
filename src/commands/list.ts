@@ -1,14 +1,16 @@
 import chalk from "chalk";
 import Table from "cli-table3";
+import dotenv from "dotenv";
 import fs from "fs-extra";
 import * as path from "path";
-import {
-  Task,
-  extractStatusFromIssue,
-  fetchGitHubIssue,
-  fetchGitHubIssues,
-  fetchIssueProjectInfo,
-} from "../utils/github.js";
+import { Task } from "../utils/github.js";
+
+// Carregar variáveis de ambiente
+dotenv.config();
+
+// Obter variáveis de ambiente para GitHub
+const GITHUB_OWNER = process.env.GITHUB_OWNER || "";
+const GITHUB_REPO = process.env.GITHUB_REPO || "";
 
 interface GitHubIssue {
   number: number;
@@ -50,63 +52,10 @@ export const listTasks = async (options = { offline: false }): Promise<void> => 
       }
     }
 
-    // Atualizar com informações do GitHub apenas se não estiver em modo offline
-    if (!options.offline) {
-      try {
-        // Obter issues do GitHub para atualizar estados e informações
-        console.log(chalk.blue("\n🔄 Atualizando informações das tasks do GitHub..."));
-        const githubIssues = await fetchGitHubIssues();
+    console.log(chalk.blue("\n📄 Exibindo informações armazenadas localmente."));
+    console.log(chalk.gray("Para sincronizar com o GitHub, use: devtask sync"));
 
-        // Mapa de issue number para estado
-        const issueStates = new Map<number, string>();
-        githubIssues.forEach((issue: GitHubIssue) => {
-          issueStates.set(issue.number, issue.state);
-        });
-
-        // Atualizar estado das tarefas locais com base nas issues do GitHub
-        // e buscar informações atualizadas de projeto e milestone
-        for (const task of tasks) {
-          if (task.github_issue_number) {
-            // Atualizar estado se disponível no mapa
-            if (issueStates.has(task.github_issue_number)) {
-              task.state = issueStates.get(task.github_issue_number);
-            }
-
-            // Buscar informações detalhadas da issue para milestone atual
-            try {
-              const issue = await fetchGitHubIssue(task.github_issue_number);
-              if (issue) {
-                // Atualizar milestone com valor atual do GitHub
-                task.milestone = issue.milestone?.title || "";
-
-                // Buscar projeto atualizado
-                const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
-                if (projectInfo) {
-                  task.project = projectInfo;
-                } else {
-                  task.project = "";
-                }
-
-                // Atualizar status com informações do projeto no GitHub
-                const statusFromProject = await extractStatusFromIssue(issue);
-                if (statusFromProject) {
-                  task.status = statusFromProject;
-                }
-              }
-            } catch (error) {
-              // Silenciar erro, manter dados locais
-            }
-          }
-        }
-      } catch (error) {
-        console.error(chalk.yellow("\n⚠️ Erro ao conectar com GitHub. Exibindo informações locais."));
-        console.log(chalk.gray("Para listar sem tentar conectar ao GitHub, use: devtask list --offline"));
-      }
-    } else {
-      console.log(chalk.blue("\n📄 Modo offline: exibindo informações armazenadas localmente."));
-    }
-
-    // Preparar tabela para exibição - usando o mesmo estilo do comando sync
+    // Preparar tabela para exibição
     const table = new Table({
       head: [
         chalk.cyan("Título"),
@@ -114,6 +63,7 @@ export const listTasks = async (options = { offline: false }): Promise<void> => 
         chalk.cyan("Status GitHub"),
         chalk.cyan("Projeto"),
         chalk.cyan("Sprint"),
+        chalk.cyan("Sincronizado"),
       ],
       wordWrap: true,
       wrapOnWordBoundary: true,
@@ -123,27 +73,85 @@ export const listTasks = async (options = { offline: false }): Promise<void> => 
     tasks.forEach((task) => {
       // Usar github_issue_number
       const issueNumber = task.github_issue_number;
-      const issuePrefix = issueNumber ? `#${issueNumber} - ` : "";
+
+      // Criar link para issue no GitHub, se tiver número
+      let issueTitle = task.title;
+      let issuePrefix = "";
+
+      if (issueNumber) {
+        // Construir URL para a issue no GitHub
+        const githubUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/issues/${issueNumber}`;
+        // Criar texto com link utilizando formatação de terminal hyperlink
+        issuePrefix = `#${issueNumber} - `;
+        // O formato \u001b]8;;URL\u0007TEXT\u001b]8;;\u0007 cria um hyperlink no terminal
+        issueTitle = `\u001b]8;;${githubUrl}\u0007${task.title}\u001b]8;;\u0007`;
+      }
+
       // Remover '@' do nome do projeto se existir e garantir N/A se vazio
       const projectName = task.project ? (task.project.startsWith("@") ? task.project.substring(1) : task.project) : "";
 
       // Determinar o status do GitHub
       let githubStatus = "N/A";
-      if (task.state && task.state !== "local") {
-        githubStatus = task.state === "open" ? "Aberta" : "Fechada";
+      if (task.state) {
+        if (task.state === "deleted") {
+          githubStatus = chalk.red("Excluída");
+        } else {
+          githubStatus = task.state === "open" ? "Aberta" : "Fechada";
+        }
       }
 
+      // Determinar o status de sincronização
+      const syncStatus = task.synced ? chalk.green("✓") : chalk.red("✗");
+      // Verificar modificação pelo timestamp de sincronização
+      let modifiedSymbol = "";
+
+      // Verificar se o arquivo foi modificado após a sincronização
+      try {
+        const taskPath = path.join(
+          tasksDir,
+          taskFiles.find((f) => f.includes(`${task.id}-`) || f.includes(`-${task.id}-`)) || ""
+        );
+        if (fs.existsSync(taskPath)) {
+          const fileStats = fs.statSync(taskPath);
+          const lastModifiedTime = new Date(fileStats.mtime).getTime();
+          const lastSyncTime = task.lastSyncAt ? new Date(task.lastSyncAt).getTime() : 0;
+
+          if (lastModifiedTime > lastSyncTime) {
+            modifiedSymbol = chalk.yellow("!");
+          }
+        }
+      } catch (error) {
+        // Silenciar erro
+      }
+
+      const syncSymbol = `${syncStatus}${modifiedSymbol}`;
+
+      // Destacar título em cinza para issues excluídas no GitHub
+      const titleDisplay =
+        task.state === "deleted"
+          ? chalk.gray(`${issuePrefix}${issueTitle}`)
+          : chalk.green(`${issuePrefix}${issueTitle}`);
+
       table.push([
-        chalk.green(`${issuePrefix}${task.title}`),
+        titleDisplay,
         getColoredStatus(task.status),
         githubStatus,
         projectName || "N/A",
         task.milestone || "N/A",
+        syncSymbol,
       ]);
     });
 
     console.log(chalk.bold("\nLista de Tarefas:"));
     console.log(table.toString());
+
+    // Adicionar legenda para os símbolos de sincronização
+    console.log("\nLegenda:");
+    console.log(`${chalk.green("✓")} - Sincronizado com GitHub`);
+    console.log(`${chalk.red("✗")} - Não sincronizado`);
+    console.log(`${chalk.yellow("!")} - Modificado localmente desde a última sincronização`);
+    console.log(`${chalk.red("Excluída")} - Issue removida do GitHub mas mantida localmente`);
+    console.log(chalk.blue("Os títulos das tarefas são clicáveis e abrem diretamente no GitHub"));
   } catch (error) {
     console.error(chalk.red("Erro ao listar tarefas:"), error);
   }

@@ -428,17 +428,122 @@ export const fetchGitHubIssues = async (): Promise<any[]> => {
     const owner = process.env.GITHUB_OWNER;
     const repo = process.env.GITHUB_REPO;
 
+    console.log(`\nBuscando issues no repositório ${owner}/${repo}...`);
+
     const octokit = new Octokit({
       auth: process.env.GITHUB_TOKEN,
     });
 
-    const response = await octokit.rest.issues.list({
-      owner,
-      repo,
-      per_page: 100,
-    });
+    // Implementação com paginação para buscar todas as issues abertas
+    console.log("Buscando issues abertas com paginação...");
+    const openIssues: any[] = [];
+    let pageOpen = 1;
+    let hasMoreOpenIssues = true;
 
-    return response.data;
+    while (hasMoreOpenIssues) {
+      try {
+        const response = await octokit.rest.issues.list({
+          owner,
+          repo,
+          state: "open",
+          per_page: 100,
+          page: pageOpen,
+        });
+
+        if (response.data.length === 0) {
+          hasMoreOpenIssues = false;
+        } else {
+          openIssues.push(...response.data);
+          console.log(`  Página ${pageOpen}: encontradas ${response.data.length} issues abertas`);
+          pageOpen++;
+        }
+      } catch (error: any) {
+        console.error(`Erro ao buscar página ${pageOpen} de issues abertas:`, error.message);
+        hasMoreOpenIssues = false;
+      }
+    }
+
+    // Implementação com paginação para buscar todas as issues fechadas
+    console.log("Buscando issues fechadas com paginação...");
+    const closedIssues: any[] = [];
+    let pageClosed = 1;
+    let hasMoreClosedIssues = true;
+
+    while (hasMoreClosedIssues) {
+      try {
+        const response = await octokit.rest.issues.list({
+          owner,
+          repo,
+          state: "closed",
+          per_page: 100,
+          page: pageClosed,
+        });
+
+        if (response.data.length === 0) {
+          hasMoreClosedIssues = false;
+        } else {
+          closedIssues.push(...response.data);
+          console.log(`  Página ${pageClosed}: encontradas ${response.data.length} issues fechadas`);
+          pageClosed++;
+        }
+      } catch (error: any) {
+        console.error(`Erro ao buscar página ${pageClosed} de issues fechadas:`, error.message);
+        hasMoreClosedIssues = false;
+      }
+    }
+
+    // Buscar informações sobre o repositório para validação
+    console.log("Verificando informações do repositório...");
+    try {
+      const repoInfo = await octokit.rest.repos.get({
+        owner,
+        repo,
+      });
+      console.log(`✅ Conectado ao repositório: ${repoInfo.data.full_name}`);
+      console.log(`   Descrição: ${repoInfo.data.description || "Nenhuma"}`);
+      console.log(`   Issues abertas (contagem do GitHub): ${repoInfo.data.open_issues_count}`);
+    } catch (error: any) {
+      console.error(`⚠️ Erro ao acessar o repositório: ${error.message}`);
+      console.log(`⚠️ Verifique se as variáveis GITHUB_OWNER='${owner}' e GITHUB_REPO='${repo}' estão corretas`);
+
+      if (error.status === 401) {
+        console.error(
+          `⚠️ Erro de autenticação (401). Verifique se o token GITHUB_TOKEN é válido e tem as permissões necessárias.`
+        );
+      } else if (error.status === 404) {
+        console.error(
+          `⚠️ Repositório não encontrado (404). Verifique se o proprietário e o nome do repositório estão corretos.`
+        );
+      }
+    }
+
+    // Combinar issues abertas e fechadas
+    const allIssues = [...openIssues, ...closedIssues];
+
+    // Filtrar pull requests, pois a API também retorna PRs como issues
+    const issuesOnly = allIssues.filter((issue) => !issue.pull_request);
+
+    // Verificar projetos associados ao repositório
+    console.log("\nVerificando projetos associados ao repositório...");
+    try {
+      const projects = await fetchProjects();
+      if (projects.size > 0) {
+        console.log(`Encontrados ${projects.size} projetos associados:`);
+        for (const [name, id] of projects.entries()) {
+          console.log(`  - ${name} (ID: ${id.substring(0, 10)}...)`);
+        }
+      } else {
+        console.log("Nenhum projeto encontrado associado ao repositório.");
+      }
+    } catch (error) {
+      console.error("Erro ao buscar projetos:", error);
+    }
+
+    console.log(
+      `\nTotal: ${issuesOnly.length} issues encontradas (${openIssues.length} abertas, ${closedIssues.length} fechadas)`
+    );
+
+    return issuesOnly;
   } catch (error) {
     console.error("Erro ao buscar issues do GitHub:", error);
     return [];
@@ -446,19 +551,19 @@ export const fetchGitHubIssues = async (): Promise<any[]> => {
 };
 
 // Função para gerar nome de arquivo da task
-function getTaskFilename(task: Task): string {
-  const slug = task.title
+export function getTaskFilename(task: Task): string {
+  const sanitizedTitle = task.title
     .toLowerCase()
     .replace(/\s+/g, "-")
     .replace(/[^\w-]/g, "");
 
   // Se tiver número de issue, incluir no nome do arquivo
   if (task.github_issue_number) {
-    return `#${task.github_issue_number}-${task.id}-${slug}.json`;
+    return `#${task.github_issue_number}-${task.id}-${sanitizedTitle}.json`;
   }
 
   // Se não tiver, usar o formato original
-  return `${task.id}-${slug}.json`;
+  return `${task.id}-${sanitizedTitle}.json`;
 }
 
 // Função para atualizar task local com informações do GitHub
@@ -505,38 +610,71 @@ export async function fetchGitHubIssue(issueNumber: number): Promise<any | null>
     });
 
     return response.data;
-  } catch (error) {
+  } catch (error: any) {
+    // Verifica se é um erro 404 (não encontrado)
+    if (error.status === 404) {
+      console.log(`⚠️ Issue #${issueNumber} não encontrada no GitHub, possivelmente foi excluída.`);
+      return {
+        number: issueNumber,
+        state: "deleted",
+        title: "Issue excluída no GitHub",
+        body: "",
+        labels: [],
+        milestone: null,
+        node_id: null,
+      };
+    }
+
     console.error(`❌ Erro ao buscar issue #${issueNumber} do GitHub:`, error);
     return null;
   }
 }
 
-/**
- * Extrai o status a partir de uma issue do GitHub
- * @param issue Issue do GitHub
- * @returns Status extraído (done, todo, in progress, etc)
- */
+// Função para extrair o status de uma issue do GitHub
 export async function extractStatusFromIssue(issue: any): Promise<string> {
-  // Se a issue estiver fechada, o status é sempre "done"
-  if (issue.state === "closed") {
-    return "done";
-  }
-
-  // Buscar status exclusivamente do projeto
   try {
-    if (issue.number) {
-      // Buscar informações do projeto e status
-      const projectStatus = await fetchProjectStatus(issue.number);
-      if (projectStatus) {
-        return projectStatus;
+    // Verificar se a issue recebida é válida
+    if (!issue) {
+      console.log("Issue inválida recebida na função extractStatusFromIssue");
+      return "todo";
+    }
+
+    // Verificar se a issue foi excluída
+    if (issue.state === "deleted") {
+      return "deleted";
+    }
+
+    // Verificar status nas labels
+    if (issue.labels && Array.isArray(issue.labels)) {
+      const statusLabel = issue.labels.find((label: any) => label && label.name && label.name.startsWith("status:"));
+      if (statusLabel) {
+        return statusLabel.name.replace("status:", "");
       }
     }
-  } catch (error) {
-    // Silenciar erro
-  }
 
-  // Default para issues abertas sem status encontrado no projeto
-  return "todo";
+    // Verificar status no projeto
+    try {
+      if (issue.number) {
+        const projectStatus = await fetchProjectStatus(issue.number);
+        if (projectStatus) {
+          return projectStatus;
+        }
+      }
+    } catch (err) {
+      console.log(`Erro ao buscar status de projeto para issue #${issue.number}`, err);
+    }
+
+    // Verificar estado da issue
+    if (issue.state === "closed") {
+      return "done";
+    }
+
+    // Valor padrão
+    return "todo";
+  } catch (error) {
+    console.error(`Erro ao extrair status da issue:`, error);
+    return "todo";
+  }
 }
 
 // Função para buscar o status de uma issue no projeto do GitHub
@@ -623,7 +761,11 @@ async function fetchProjectStatus(issueNumber: number): Promise<string | null> {
     }
 
     return null;
-  } catch (error) {
+  } catch (error: any) {
+    // Se for erro 404, simplesmente retorna null sem logar o erro
+    if (error.status === 404) {
+      return null;
+    }
     console.error(`❌ Erro ao buscar status da issue #${issueNumber} no projeto:`, error);
     return null;
   }
@@ -632,31 +774,60 @@ async function fetchProjectStatus(issueNumber: number): Promise<string | null> {
 // Função para atualizar task local a partir de uma issue do GitHub
 export async function updateLocalTaskFromIssue(task: Task, issue: any): Promise<boolean> {
   try {
+    console.log(`Atualizando task local com base na issue #${issue.number}...`);
+    console.log(`Dados brutos da milestone recebida: ${JSON.stringify(issue.milestone || "Nenhuma")}`);
+
     // Extrair status da issue usando a função auxiliar
     const status = await extractStatusFromIssue(issue);
 
-    // Primeiro remover arquivo antigo se ele existir
-    const oldFilePath = path.join(
-      ".task/issues",
-      `${task.id}-${task.title
-        .toLowerCase()
-        .replace(/\s+/g, "-")
-        .replace(/[^\w-]/g, "")}.json`
-    );
+    // Extrair informações de milestone da issue
+    const milestoneName = issue.milestone?.title || "";
 
-    if (task.github_issue_number) {
-      const oldFileWithGithub = path.join(
-        ".task/issues",
-        `#${task.github_issue_number}-${task.id}-${task.title
-          .toLowerCase()
-          .replace(/\s+/g, "-")
-          .replace(/[^\w-]/g, "")}.json`
+    console.log(`Milestone extraída: "${milestoneName}"`);
+
+    // Comparar valores atuais com os valores da issue do GitHub para log
+    if (task.status !== status) {
+      console.log(chalk.yellow(`  - Status atualizado: "${task.status || "Nenhum"}" → "${status || "Nenhum"}"`));
+    }
+
+    if (task.milestone !== milestoneName) {
+      console.log(
+        chalk.yellow(`  - Milestone atualizada: "${task.milestone || "Nenhuma"}" → "${milestoneName || "Nenhuma"}"`)
       );
-      try {
-        await fs.remove(oldFileWithGithub);
-      } catch (error) {
-        // Ignora erro se o arquivo não existir
+    }
+
+    // Calcular os nomes de arquivos antigos que precisamos verificar e remover
+    // 1. Nome baseado apenas no ID (formato antigo)
+    const sanitizedOldTitle = task.title
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^\w-]/g, "");
+
+    const oldFilePath = path.join(".task/issues", `${task.id}-${sanitizedOldTitle}.json`);
+
+    // 2. Nome baseado no número da issue e ID
+    let oldFileWithGithubPath = null;
+    if (task.github_issue_number) {
+      oldFileWithGithubPath = path.join(
+        ".task/issues",
+        `#${task.github_issue_number}-${task.id}-${sanitizedOldTitle}.json`
+      );
+    }
+
+    // Remover arquivos antigos se existirem
+    try {
+      if (fs.existsSync(oldFilePath)) {
+        console.log(`Removendo arquivo antigo: ${oldFilePath}`);
+        await fs.remove(oldFilePath);
       }
+
+      if (oldFileWithGithubPath && fs.existsSync(oldFileWithGithubPath)) {
+        console.log(`Removendo arquivo antigo com GitHub: ${oldFileWithGithubPath}`);
+        await fs.remove(oldFileWithGithubPath);
+      }
+    } catch (error) {
+      console.log(`Erro ao remover arquivos antigos: ${error}`);
+      // Continue mesmo se houver erros na remoção
     }
 
     // Extrair timestamp da última atualização da issue
@@ -672,56 +843,143 @@ export async function updateLocalTaskFromIssue(task: Task, issue: any): Promise<
     // Extrair informações de projeto se existirem na descrição
     let projectFromDesc = "";
     if (issue.body && issue.body.includes("**Projeto:**")) {
-      const projectMatch = issue.body.match(/\*\*Projeto:\*\*\s*(.*?)$/m);
+      const projectMatch = issue.body.match(/\*\*Projeto:\*\*\s*(.*?)(\n|$)/);
       if (projectMatch && projectMatch[1]) {
         projectFromDesc = projectMatch[1].trim();
+        if (projectFromDesc === "Nenhum") {
+          projectFromDesc = "";
+        }
       }
     }
 
-    // Mostrar mudança de status se houver
-    if (task.status !== status) {
-      console.log(chalk.yellow(`  - Status atualizado: "${task.status}" → "${status}"`));
+    // Extrair milestone da descrição se existir (caso o objeto milestone esteja ausente)
+    let milestoneFromDesc = "";
+    if (issue.body && issue.body.includes("**Milestone:**")) {
+      const milestoneMatch = issue.body.match(/\*\*Milestone:\*\*\s*(.*?)(\n|$)/);
+      if (milestoneMatch && milestoneMatch[1]) {
+        milestoneFromDesc = milestoneMatch[1].trim();
+        if (milestoneFromDesc === "Nenhuma") {
+          milestoneFromDesc = "";
+        }
+      }
     }
 
-    // Atualizar propriedades
+    // Determinar milestone final (prioridade: objeto milestone > descrição)
+    const finalMilestoneName = milestoneName || milestoneFromDesc;
+    console.log(`Milestone final a ser usado: "${finalMilestoneName}"`);
+
+    // Atualizar propriedades da task local com base na issue do GitHub
+    const originalValues = {
+      milestone: task.milestone,
+      status: task.status,
+      project: task.project,
+    };
+
+    // Atualizar propriedades da task
     task.title = issue.title;
     task.description = issue.body ? issue.body.split("---")[0].trim() : "";
     task.status = status;
-    // Sempre usar a milestone da issue (ou string vazia se não tiver)
-    task.milestone = issue.milestone?.title || "";
+    task.milestone = finalMilestoneName; // Garantir que a milestone é atualizada
     task.synced = true;
     task.github_issue_number = issue.number;
     task.lastSyncAt = lastSyncAt;
     task.state = issue.state; // Armazenar o estado da issue (open/closed)
 
     // Inicializar o projeto como vazio por padrão
-    task.project = "";
-
-    // Se encontramos um projeto na descrição, usar ele
-    if (projectFromDesc) {
-      task.project = projectFromDesc;
-    }
+    task.project = projectFromDesc || "";
 
     // Buscar informações de projeto vinculado à issue (superior ao descrito no corpo)
     try {
       const projectInfo = await fetchIssueProjectInfo(issue.number);
       if (projectInfo) {
+        if (task.project !== projectInfo) {
+          console.log(chalk.yellow(`  - Projeto atualizado: "${task.project || "Nenhum"}" → "${projectInfo}"`));
+        }
         task.project = projectInfo;
       }
     } catch (error) {
-      // Silenciar erro
+      console.log(`Erro ao buscar projeto: ${error}`);
     }
 
-    // Remover o arquivo antigo se existir
-    try {
-      await fs.remove(oldFilePath);
-    } catch (error) {
-      // Ignora erro se o arquivo não existir
-    }
+    // Gerar o nome de arquivo atualizado
+    const newFileName = getTaskFilename(task);
+    const taskPath = path.join(".task/issues", newFileName);
 
-    // Salvar as alterações com novo nome de arquivo
-    const taskPath = path.join(".task/issues", getTaskFilename(task));
+    console.log(`Salvando task atualizada em: ${taskPath}`);
+    console.log(`Salvando milestone: "${task.milestone}" (era: "${originalValues.milestone}")`);
+
+    // Criar uma cópia para verificação posterior
+    const taskToSave = { ...task };
+
+    // Salvar o JSON no arquivo
     await fs.writeJSON(taskPath, task, { spaces: 2 });
+
+    // Verificar se o arquivo foi salvo corretamente
+    try {
+      if (!fs.existsSync(taskPath)) {
+        console.log(chalk.red(`⚠️ ERRO: Arquivo não encontrado após o salvamento: ${taskPath}`));
+        return false;
+      }
+
+      const savedTask = await fs.readJSON(taskPath);
+
+      // Verificar se a milestone foi salva corretamente
+      if (savedTask.milestone !== taskToSave.milestone) {
+        console.log(
+          chalk.red(
+            `⚠️ ERRO: A milestone não foi salva corretamente. Esperado: "${taskToSave.milestone}", Atual: "${savedTask.milestone}"`
+          )
+        );
+
+        // Tentar uma nova abordagem de salvamento
+        console.log(chalk.yellow(`Tentando salvar milestone novamente com método alternativo...`));
+
+        // Abordagem direta com fs.writeFileSync
+        const taskData = JSON.stringify({ ...task, milestone: taskToSave.milestone }, null, 2);
+        fs.writeFileSync(taskPath, taskData);
+
+        // Verificar novamente
+        const rereadTask = await fs.readJSON(taskPath);
+        if (rereadTask.milestone !== taskToSave.milestone) {
+          console.log(
+            chalk.red(`⚠️ ERRO PERSISTENTE: A milestone ainda não foi salva corretamente após segunda tentativa.`)
+          );
+          return false;
+        }
+
+        console.log(chalk.green(`✅ Milestone salva corretamente após segunda tentativa!`));
+      }
+
+      // Verificar se o status foi salvo corretamente
+      if (savedTask.status !== status) {
+        console.log(
+          chalk.red(`⚠️ ERRO: O status não foi salvo corretamente. Esperado: "${status}", Atual: "${savedTask.status}"`)
+        );
+        return false;
+      }
+
+      // Resumo das mudanças reais
+      if (originalValues.milestone !== savedTask.milestone) {
+        console.log(
+          chalk.green(`✅ Milestone atualizada e verificada: "${originalValues.milestone}" → "${savedTask.milestone}"`)
+        );
+      }
+
+      if (originalValues.status !== savedTask.status) {
+        console.log(
+          chalk.green(`✅ Status atualizado e verificado: "${originalValues.status}" → "${savedTask.status}"`)
+        );
+      }
+
+      if (originalValues.project !== savedTask.project) {
+        console.log(
+          chalk.green(`✅ Projeto atualizado e verificado: "${originalValues.project}" → "${savedTask.project}"`)
+        );
+      }
+    } catch (error) {
+      console.error(`Erro ao verificar salvamento do arquivo: ${error}`);
+      return false;
+    }
 
     console.log(`✅ Task local "${task.title}" atualizada a partir da issue #${issue.number}`);
     return true;
@@ -803,6 +1061,83 @@ export async function createLocalTaskFromIssue(issue: any): Promise<void> {
   }
 }
 
+// Adicionar issue a vários projetos
+async function addIssueToMultipleProjects(issueNodeId: string, projectNames: string[]): Promise<boolean> {
+  try {
+    // Buscar todos os projetos disponíveis
+    const availableProjects = await fetchProjects();
+
+    // Converter nomes para IDs de projetos
+    const projectIds: string[] = [];
+
+    for (const projectName of projectNames) {
+      // Normalizar o nome do projeto para várias possibilidades (com/sem @)
+      const nameWithAt = projectName.startsWith("@") ? projectName : `@${projectName}`;
+      const nameWithoutAt = projectName.startsWith("@") ? projectName.substring(1) : projectName;
+
+      // Procurar projeto pelo nome exato ou variações
+      const projectId =
+        availableProjects.get(projectName) || availableProjects.get(nameWithAt) || availableProjects.get(nameWithoutAt);
+
+      if (projectId) {
+        projectIds.push(projectId);
+      } else {
+        console.log(`⚠️ Projeto "${projectName}" não encontrado`);
+      }
+    }
+
+    // Se não encontrou nenhum projeto, retornar false
+    if (projectIds.length === 0) {
+      console.log("❌ Nenhum projeto válido encontrado para adicionar a issue");
+      return false;
+    }
+
+    // Adicionar a issue a cada projeto encontrado
+    let success = true;
+    for (const projectId of projectIds) {
+      try {
+        // Primeiro obter o ID do projeto
+        const getProjectQuery = `
+          query {
+            node(id: "${projectId}") {
+              ... on ProjectV2 {
+                id
+              }
+            }
+          }
+        `;
+
+        const projectResponse = await octokit.graphql<ProjectQueryResponse>(getProjectQuery);
+
+        // Adicionar o item ao projeto
+        const mutation = `
+          mutation {
+            addProjectV2ItemById(input: {
+              projectId: "${projectResponse.node.id}",
+              contentId: "${issueNodeId}"
+            }) {
+              item {
+                id
+              }
+            }
+          }
+        `;
+
+        await octokit.graphql(mutation);
+        console.log(`✅ Issue adicionada ao projeto ID: ${projectId}`);
+      } catch (error) {
+        console.error(`❌ Erro ao adicionar issue ao projeto ${projectId}:`, error);
+        success = false;
+      }
+    }
+
+    return success;
+  } catch (error) {
+    console.error("❌ Erro ao adicionar issue aos projetos:", error);
+    return false;
+  }
+}
+
 // Função para atualizar um issue no GitHub com status de task local
 export async function updateGitHubIssue(task: Task): Promise<boolean> {
   try {
@@ -812,29 +1147,60 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
     }
 
     // Buscar a issue atual para comparar
-    const currentIssue = await fetchGitHubIssue(task.github_issue_number);
-    if (!currentIssue) {
-      console.error(`❌ Issue #${task.github_issue_number} não encontrada.`);
-      return false;
+    const issue = await fetchGitHubIssue(task.github_issue_number);
+
+    // Verificar se a issue foi excluída no GitHub (retorna null quando a issue não existe)
+    if (!issue) {
+      console.log(`⚠️ Issue #${task.github_issue_number} não foi encontrada no GitHub (provavelmente excluída).`);
+      console.log(`📝 Atualizando status da task local para "deleted"`);
+
+      // Atualizar status local para mostrar que a issue foi excluída no GitHub
+      task.status = "deleted";
+      task.state = "deleted";
+      task.lastSyncAt = new Date().toISOString();
+
+      // Salvar a task atualizada com o novo status
+      const taskPath = path.join(".task/issues", getTaskFilename(task));
+      await fs.writeJSON(taskPath, task, { spaces: 2 });
+
+      return true;
+    }
+
+    // Verificar se a issue tem o estado "deleted" explícito
+    if (issue.state === "deleted") {
+      console.log(`⚠️ Issue #${task.github_issue_number} foi marcada como excluída no GitHub.`);
+      console.log(`📝 Atualizando status da task local para "deleted"`);
+
+      // Atualizar status local para mostrar que a issue foi excluída no GitHub
+      task.status = "deleted";
+      task.state = "deleted";
+      task.lastSyncAt = new Date().toISOString();
+
+      // Salvar a task atualizada com o novo status
+      const taskPath = path.join(".task/issues", getTaskFilename(task));
+      await fs.writeJSON(taskPath, task, { spaces: 2 });
+
+      return true;
     }
 
     // Verificar se há mudanças no status
-    const currentStatus = await extractStatusFromIssue(currentIssue);
+    const currentStatus = await extractStatusFromIssue(issue);
     const statusChanged = currentStatus !== task.status;
     if (statusChanged) {
       console.log(`Status mudou de "${currentStatus}" para "${task.status}"`);
     }
 
-    // Verificar se há mudanças no projeto
-    const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
-    const projectChanged = projectInfo !== task.project;
+    // Buscar projetos atuais vinculados à issue
+    const currentProjectInfo = await fetchIssueProjectInfo(task.github_issue_number);
 
+    // Verificar se há mudanças no projeto
+    const projectChanged = currentProjectInfo !== task.project;
     if (projectChanged) {
-      console.log(`Projeto mudou de "${projectInfo || "Nenhum"}" para "${task.project || "Nenhum"}"`);
+      console.log(`Projeto mudou de "${currentProjectInfo || "Nenhum"}" para "${task.project || "Nenhum"}"`);
     }
 
     // Verificar se há mudanças na milestone
-    const currentMilestone = currentIssue.milestone?.title || "";
+    const currentMilestone = issue.milestone?.title || "";
     const milestoneChanged = currentMilestone !== task.milestone;
 
     if (milestoneChanged) {
@@ -842,9 +1208,11 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
     }
 
     // Preparar labels - manter labels existentes exceto as de status
-    const existingLabels = currentIssue.labels
-      .filter((label: any) => !label.name.startsWith("status:"))
-      .map((label: any) => label.name);
+    const existingLabels = Array.isArray(issue.labels)
+      ? issue.labels
+          .filter((label: any) => label && label.name && !label.name.startsWith("status:"))
+          .map((label: any) => label.name)
+      : [];
 
     const labels = [...existingLabels];
 
@@ -872,16 +1240,51 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
     // Buscar o ID da milestone se foi alterada
     let milestoneNumber = undefined;
     if (milestoneChanged && task.milestone) {
+      // Recarregar todas as milestones para garantir que temos as mais recentes
       const milestones = await fetchMilestones();
-      milestoneNumber = milestones.get(task.milestone.toLowerCase());
+      console.log(`🔍 Verificando milestone "${task.milestone}"...`);
 
-      if (!milestoneNumber) {
+      // Verificar se já existe (de maneira case-insensitive)
+      const existingMilestone = Array.from(milestones.entries()).find(
+        ([name]) => name.toLowerCase() === task.milestone.toLowerCase()
+      );
+
+      if (existingMilestone) {
+        milestoneNumber = existingMilestone[1];
+        console.log(`✅ Milestone "${task.milestone}" já existe (ID: ${milestoneNumber})`);
+      } else {
         console.log(`⚠️ Milestone "${task.milestone}" não encontrada no GitHub, tentando criar...`);
-        milestoneNumber = await createMilestone(task.milestone);
-        if (!milestoneNumber) {
-          console.log(`❌ Não foi possível criar a milestone "${task.milestone}"`);
-        } else {
-          console.log(`✅ Milestone "${task.milestone}" criada com sucesso (ID: ${milestoneNumber})`);
+        try {
+          milestoneNumber = await createMilestone(task.milestone);
+          if (!milestoneNumber) {
+            console.log(`❌ Não foi possível criar a milestone "${task.milestone}"`);
+            console.log(`⚠️ A issue será atualizada sem milestone.`);
+          } else {
+            console.log(`✅ Milestone "${task.milestone}" criada com sucesso (ID: ${milestoneNumber})`);
+          }
+        } catch (error: any) {
+          // Verificar se o erro é de "already exists"
+          if (error.status === 422 && error.response?.data?.errors?.some((e: any) => e.code === "already_exists")) {
+            console.log(`⚠️ Milestone "${task.milestone}" já existe, mas não foi encontrada inicialmente.`);
+            console.log(`🔍 Buscando milestones novamente...`);
+
+            // Recarregar as milestones para obter a recém-criada
+            const refreshedMilestones = await fetchMilestones();
+            const foundMilestone = Array.from(refreshedMilestones.entries()).find(
+              ([name]) => name.toLowerCase() === task.milestone.toLowerCase()
+            );
+
+            if (foundMilestone) {
+              milestoneNumber = foundMilestone[1];
+              console.log(`✅ Milestone encontrada após nova busca (ID: ${milestoneNumber})`);
+            } else {
+              console.log(`❌ Não foi possível encontrar a milestone, mesmo após nova busca.`);
+              console.log(`⚠️ A issue será atualizada sem milestone.`);
+            }
+          } else {
+            console.error(`❌ Erro ao criar milestone:`, error);
+            console.log(`⚠️ A issue será atualizada sem milestone.`);
+          }
         }
       }
     }
@@ -898,29 +1301,40 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
       milestone: milestoneChanged ? milestoneNumber : undefined,
     });
 
-    // Se o projeto foi alterado, vincular a issue ao novo projeto
-    if (projectChanged && task.project) {
-      const projects = await fetchProjects();
+    // Se o projeto foi alterado, vincular a issue aos projetos apropriados
+    if (projectChanged && task.project && issue.node_id) {
+      // Lista de projetos para adicionar a issue
+      const projectsToAdd: string[] = [];
 
-      // Normalizar o nome do projeto para várias possibilidades (com/sem @)
-      const projectName = task.project;
-      const projectNameWithAt = projectName.startsWith("@") ? projectName : `@${projectName}`;
-      const projectNameWithoutAt = projectName.startsWith("@") ? projectName.substring(1) : projectName;
+      // Adicionar o projeto principal da task
+      projectsToAdd.push(task.project);
 
-      // Procurar projeto pelo nome exato ou variações
-      let projectId =
-        projects.get(projectName) || projects.get(projectNameWithAt) || projects.get(projectNameWithoutAt);
+      // Adicionar também o projeto "Sistema de Gestão de Tarefas com Tags" se o nome incluir palavras-chave
+      const isTaskRelated =
+        task.title.toLowerCase().includes("tarefa") ||
+        task.title.toLowerCase().includes("task") ||
+        task.description?.toLowerCase().includes("tarefa") ||
+        task.description?.toLowerCase().includes("task");
 
-      if (projectId) {
-        console.log(`Vinculando issue #${task.github_issue_number} ao projeto "${task.project}"`);
-        const added = await addIssueToProject(currentIssue.node_id, projectId);
-        if (added) {
-          console.log(`✅ Issue adicionada ao projeto "${task.project}"`);
-        } else {
-          console.error(`❌ Não foi possível adicionar a issue ao projeto "${task.project}"`);
-        }
+      if (isTaskRelated && !task.project.includes("Sistema de Gestão")) {
+        projectsToAdd.push("Sistema de Gestão de Tarefas com Tags");
+      }
+
+      // Se o título contém "partner" ou "fornecedor", adicionar ao projeto "partners"
+      const isPartnerRelated =
+        task.title.toLowerCase().includes("partner") || task.title.toLowerCase().includes("fornecedor");
+
+      if (isPartnerRelated && !task.project.includes("partners")) {
+        projectsToAdd.push("partners");
+      }
+
+      console.log(`Vinculando issue #${task.github_issue_number} aos projetos: ${projectsToAdd.join(", ")}`);
+      const added = await addIssueToMultipleProjects(issue.node_id, projectsToAdd);
+
+      if (added) {
+        console.log(`✅ Issue vinculada aos projetos com sucesso`);
       } else {
-        console.error(`❌ Projeto "${task.project}" não encontrado no GitHub`);
+        console.error(`❌ Houve problemas ao vincular a issue aos projetos`);
       }
     }
 
@@ -939,6 +1353,8 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
 // Função para buscar informações de projeto de uma issue específica
 export async function fetchIssueProjectInfo(issueNumber: number): Promise<string | null> {
   try {
+    console.log(`Buscando projetos vinculados à issue #${issueNumber}...`);
+
     // Primeiro, precisamos obter o ID do nó da issue para usar no GraphQL
     const issue = await octokit.rest.issues.get({
       owner: GITHUB_OWNER,
@@ -952,20 +1368,20 @@ export async function fetchIssueProjectInfo(issueNumber: number): Promise<string
 
     const issueNodeId = issue.data.node_id;
 
-    // Consulta GraphQL para buscar projetos vinculados à issue
+    // Consulta GraphQL para buscar projetos vinculados à issue (expandindo o limite para 20 projetos)
     const query = `
       query {
         node(id: "${issueNodeId}") {
           ... on Issue {
             title
-            projectItems(first: 10) {
+            projectItems(first: 20) {
               nodes {
                 project {
                   title
                 }
               }
             }
-            projectsV2(first: 10) {
+            projectsV2(first: 20) {
               nodes {
                 title
               }
@@ -994,20 +1410,56 @@ export async function fetchIssueProjectInfo(issueNumber: number): Promise<string
 
     const response = await octokit.graphql<ProjectResponse>(query);
 
-    // Verificar se a issue está em algum projeto
+    // Listar todos os projetos encontrados (para debugging)
+    const projectsFound: string[] = [];
+
+    // Verificar projetos clássicos
     if (response.node.projectItems && response.node.projectItems.nodes.length > 0) {
-      // Projetos clássicos
-      const projectTitle = response.node.projectItems.nodes[0].project.title;
-      return projectTitle.startsWith("@") ? projectTitle.substring(1) : projectTitle;
-    } else if (response.node.projectsV2 && response.node.projectsV2.nodes.length > 0) {
-      // Projetos v2
-      const projectTitle = response.node.projectsV2.nodes[0].title;
-      return projectTitle.startsWith("@") ? projectTitle.substring(1) : projectTitle;
+      response.node.projectItems.nodes.forEach((node) => {
+        if (node.project && node.project.title) {
+          projectsFound.push(node.project.title);
+        }
+      });
     }
 
+    // Verificar projetos V2
+    if (response.node.projectsV2 && response.node.projectsV2.nodes.length > 0) {
+      response.node.projectsV2.nodes.forEach((node) => {
+        if (node.title) {
+          projectsFound.push(node.title);
+        }
+      });
+    }
+
+    // Se encontrou algum projeto, mostrar quais foram encontrados
+    if (projectsFound.length > 0) {
+      console.log(`Projetos encontrados para issue #${issueNumber}: ${projectsFound.join(", ")}`);
+
+      // Primeiro, procurar pelo projeto "Sistema de Gestão de Tarefas com Tags" (preferencial)
+      const sistemaTarefas = projectsFound.find(
+        (title) => title.includes("Sistema de Gestão de Tarefas") || title.toLowerCase().includes("tarefas")
+      );
+
+      if (sistemaTarefas) {
+        console.log(`Usando projeto prioritário: "${sistemaTarefas}"`);
+        return sistemaTarefas.startsWith("@") ? sistemaTarefas.substring(1) : sistemaTarefas;
+      }
+
+      // Se não encontrar o Sistema de Tarefas, usar o primeiro projeto encontrado
+      const firstProject = projectsFound[0];
+      console.log(`Usando primeiro projeto encontrado: "${firstProject}"`);
+      return firstProject.startsWith("@") ? firstProject.substring(1) : firstProject;
+    }
+
+    console.log(`Nenhum projeto encontrado para issue #${issueNumber}`);
     return null;
-  } catch (error) {
-    console.error(`❌ Erro ao buscar projetos da issue #${issueNumber}:`, error);
+  } catch (error: any) {
+    if (error.status === 404) {
+      // Se a issue não existir, não mostrar erro completo, apenas indicar que não foi encontrada
+      console.log(`⚠️ Não foi possível encontrar projetos para issue #${issueNumber}: Issue não encontrada`);
+    } else {
+      console.error(`❌ Erro ao buscar projetos da issue #${issueNumber}:`, error);
+    }
     return null;
   }
 }
@@ -1015,7 +1467,7 @@ export async function fetchIssueProjectInfo(issueNumber: number): Promise<string
 // Função para criar uma milestone no GitHub
 export async function createMilestone(title: string, description: string = ""): Promise<number | null> {
   try {
-    const response = await octokit.rest.issues.create({
+    const response = await octokit.rest.issues.createMilestone({
       owner: GITHUB_OWNER,
       repo: GITHUB_REPO,
       title: title,
@@ -1219,6 +1671,54 @@ export async function fetchProjectStatusOptions(projectId: string): Promise<stri
   }
 }
 
+// Função para atualizar manualmente uma milestone de uma task
+export async function updateTaskMilestone(issueNumber: number, newMilestone: string): Promise<boolean> {
+  try {
+    console.log(`Atualizando manualmente a milestone da task #${issueNumber} para "${newMilestone}"...`);
+
+    // Buscar todos os arquivos de tasks no diretório .task/issues
+    const taskDir = path.join(".task/issues");
+    const files = await fs.readdir(taskDir);
+
+    // Encontrar o arquivo da task correspondente
+    const taskFile = files.find((file) => file.includes(`#${issueNumber}-`));
+
+    if (!taskFile) {
+      console.log(chalk.red(`❌ Arquivo para issue #${issueNumber} não encontrado`));
+      return false;
+    }
+
+    // Carregar a task do arquivo
+    const taskPath = path.join(taskDir, taskFile);
+    const task = (await fs.readJSON(taskPath)) as Task;
+
+    // Exibir a milestone atual
+    console.log(`Milestone atual: "${task.milestone || "Nenhuma"}"`);
+
+    // Atualizar a milestone
+    task.milestone = newMilestone;
+    task.lastSyncAt = new Date().toISOString();
+
+    // Salvar a task atualizada
+    await fs.writeJSON(taskPath, task, { spaces: 2 });
+
+    // Verificar se a alteração foi salva corretamente
+    const updatedTask = (await fs.readJSON(taskPath)) as Task;
+    if (updatedTask.milestone !== newMilestone) {
+      console.log(
+        chalk.red(`❌ Falha ao atualizar milestone para "${newMilestone}". Valor salvo: "${updatedTask.milestone}"`)
+      );
+      return false;
+    }
+
+    console.log(chalk.green(`✅ Milestone da task #${issueNumber} atualizada para "${newMilestone}"`));
+    return true;
+  } catch (error) {
+    console.error(`❌ Erro ao atualizar milestone: ${error}`);
+    return false;
+  }
+}
+
 // Exportação padrão com todas as funções
 export default {
   listMilestones,
@@ -1236,4 +1736,5 @@ export default {
   createMilestone,
   createProject,
   fetchProjectStatusOptions,
+  updateTaskMilestone,
 };

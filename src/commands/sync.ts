@@ -15,6 +15,7 @@ import {
   fetchIssueProjectInfo,
   fetchMilestones,
   fetchProjects,
+  getTaskFilename,
   updateGitHubIssue,
   updateLocalTaskFromIssue,
   updateTaskWithGitHubInfo,
@@ -84,6 +85,10 @@ async function showTasksTable() {
   try {
     console.log("\n📋 Processando dados para exibição de tarefas...");
 
+    // Obter variáveis de ambiente para GitHub
+    const GITHUB_OWNER = process.env.GITHUB_OWNER || "";
+    const GITHUB_REPO = process.env.GITHUB_REPO || "";
+
     // Pequena pausa para garantir que os arquivos foram salvos
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
@@ -102,21 +107,22 @@ async function showTasksTable() {
             // Buscar issue para obter status atual do projeto
             const issue = await fetchGitHubIssue(task.github_issue_number);
             if (issue) {
-              // Atualizar estado da issue (open/closed)
+              // Atualizar estado da issue (open/closed/deleted)
               task.state = issue.state;
 
-              // Buscar projeto atualizado
-              const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
-              if (projectInfo) {
-                task.project = projectInfo;
-              } else {
-                task.project = "";
-              }
+              // Se a issue foi excluída, não tentar buscar informações adicionais
+              if (issue.state !== "deleted") {
+                // Buscar projeto atualizado
+                const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
+                if (projectInfo) {
+                  task.project = projectInfo;
+                }
 
-              // Atualizar status com informações do projeto
-              const statusFromProject = await extractStatusFromIssue(issue);
-              if (statusFromProject) {
-                task.status = statusFromProject;
+                // Atualizar status com informações do projeto
+                const statusFromProject = await extractStatusFromIssue(issue);
+                if (statusFromProject) {
+                  task.status = statusFromProject;
+                }
               }
 
               // Salvar a task atualizada no arquivo JSON local
@@ -149,16 +155,38 @@ async function showTasksTable() {
     });
 
     updatedTasks.forEach((task: Task) => {
-      const issuePrefix = task.github_issue_number ? `#${task.github_issue_number} - ` : "";
+      // Criar link para issue no GitHub, se tiver número
+      let issueTitle = task.title;
+      let issuePrefix = "";
+
+      if (task.github_issue_number) {
+        // Construir URL para a issue no GitHub
+        const githubUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/issues/${task.github_issue_number}`;
+        // Criar texto com link utilizando formatação de terminal hyperlink
+        issuePrefix = `#${task.github_issue_number} - `;
+        // O formato \u001b]8;;URL\u0007TEXT\u001b]8;;\u0007 cria um hyperlink no terminal
+        issueTitle = `\u001b]8;;${githubUrl}\u0007${task.title}\u001b]8;;\u0007`;
+      }
+
       const projectName = task.project ? (task.project.startsWith("@") ? task.project.substring(1) : task.project) : "";
 
       let githubStatus = "N/A";
       if (task.state) {
-        githubStatus = task.state === "open" ? "Aberta" : "Fechada";
+        if (task.state === "deleted") {
+          githubStatus = chalk.red("Excluída");
+        } else {
+          githubStatus = task.state === "open" ? "Aberta" : "Fechada";
+        }
       }
 
+      // Destacar título em cinza para issues excluídas no GitHub
+      const titleDisplay =
+        task.state === "deleted"
+          ? chalk.gray(`${issuePrefix}${issueTitle}`)
+          : chalk.green(`${issuePrefix}${issueTitle}`);
+
       table.push([
-        chalk.green(`${issuePrefix}${task.title}`),
+        titleDisplay,
         getColoredStatus(task.status || "N/A"),
         githubStatus,
         projectName || "N/A",
@@ -167,6 +195,14 @@ async function showTasksTable() {
     });
 
     console.log(table.toString());
+
+    // Adicionar legenda para o status "Excluída"
+    console.log(
+      `\n${chalk.gray("Títulos em cinza")} e ${chalk.red(
+        "Excluída"
+      )} indicam issues removidas do GitHub mas mantidas localmente.`
+    );
+    console.log(chalk.blue("Os títulos das tarefas são clicáveis e abrem diretamente no GitHub"));
   } catch (error) {
     console.error("Erro ao mostrar tabela:", error);
   }
@@ -381,14 +417,48 @@ async function pullFromGitHub() {
 
     // Mapear número da issue para a task local correspondente
     const taskMap = new Map<number, Task>();
+    // Rastrear números de issues para verificar excluídas
+    const localIssueNumbers = new Set<number>();
+
     tasks.forEach((task: Task) => {
       if (task.github_issue_number) {
         taskMap.set(task.github_issue_number, task);
+        localIssueNumbers.add(task.github_issue_number);
       }
+    });
+
+    // Mapear issues do GitHub por número para verificar excluídas
+    const githubIssueNumbers = new Set<number>();
+    issues.forEach((issue) => {
+      githubIssueNumbers.add(issue.number);
     });
 
     let updated = 0;
     let created = 0;
+    let failed = 0;
+    let deleted = 0;
+
+    // Verificar issues locais que não existem mais no GitHub (possivelmente excluídas)
+    for (const issueNumber of localIssueNumbers) {
+      if (!githubIssueNumbers.has(issueNumber)) {
+        console.log(chalk.yellow(`⚠️ Issue #${issueNumber} não encontrada no GitHub (possivelmente excluída).`));
+
+        // Obter a task local
+        const task = taskMap.get(issueNumber)!;
+
+        // Atualizar status local para mostrar que a issue foi excluída
+        task.status = "deleted";
+        task.state = "deleted";
+        task.lastSyncAt = new Date().toISOString();
+
+        // Salvar a task atualizada com o novo status
+        const taskPath = path.join(".task/issues", getTaskFilename(task));
+        await fs.writeJSON(taskPath, task, { spaces: 2 });
+
+        console.log(chalk.green(`✅ Task local atualizada para status "deleted"`));
+        deleted++;
+      }
+    }
 
     // Processar cada issue
     for (const issue of issues) {
@@ -396,19 +466,79 @@ async function pullFromGitHub() {
         // Atualizar task existente
         console.log(chalk.blue(`- Atualizando task para issue #${issue.number}: ${issue.title}`));
 
-        // Obter milestone atual antes da atualização
+        // Obter a task local existente
         const currentTask = taskMap.get(issue.number)!;
-        const oldMilestone = currentTask.milestone || "Nenhuma";
-        const newMilestone = issue.milestone?.title || "Nenhuma";
 
-        await updateLocalTaskFromIssue(currentTask, issue);
+        // Armazenar valores originais para verificação
+        const originalValues = {
+          milestone: currentTask.milestone || "",
+          status: currentTask.status || "",
+          project: currentTask.project || "",
+        };
 
-        // Mostrar se a milestone foi atualizada
-        if (oldMilestone !== newMilestone) {
-          console.log(chalk.yellow(`  - Milestone atualizada: "${oldMilestone}" → "${newMilestone}"`));
+        // Valores esperados do GitHub
+        const expectedValues = {
+          milestone: issue.milestone?.title || "",
+          status: await extractStatusFromIssue(issue),
+          project: (await fetchIssueProjectInfo(issue.number)) || "",
+        };
+
+        // Atualizar a task local com os dados do GitHub
+        const wasUpdated = await updateLocalTaskFromIssue(currentTask, issue);
+
+        if (wasUpdated) {
+          // Verificar se a atualização realmente aconteceu
+          const taskPath = path.join(taskDir, files.find((f) => f.includes(`#${issue.number}-`)) || "");
+
+          if (fs.existsSync(taskPath)) {
+            const updatedTask = await fs.readJSON(taskPath);
+
+            // Verificar se os valores foram atualizados corretamente
+            const milestoneUpdated =
+              originalValues.milestone !== expectedValues.milestone
+                ? updatedTask.milestone === expectedValues.milestone
+                : true;
+
+            const statusUpdated =
+              originalValues.status !== expectedValues.status ? updatedTask.status === expectedValues.status : true;
+
+            if (!milestoneUpdated) {
+              console.log(
+                chalk.red(
+                  `⚠️ ERRO: Milestone não foi atualizada! Esperado: "${expectedValues.milestone}", Atual: "${updatedTask.milestone}"`
+                )
+              );
+              failed++;
+            } else if (originalValues.milestone !== updatedTask.milestone) {
+              console.log(
+                chalk.green(
+                  `  ✅ Milestone atualizada com sucesso: "${originalValues.milestone}" → "${updatedTask.milestone}"`
+                )
+              );
+            }
+
+            if (!statusUpdated) {
+              console.log(
+                chalk.red(
+                  `⚠️ ERRO: Status não foi atualizado! Esperado: "${expectedValues.status}", Atual: "${updatedTask.status}"`
+                )
+              );
+              failed++;
+            }
+
+            // Se tudo estiver correto, incrementar contador
+            if (milestoneUpdated && statusUpdated) {
+              console.log(chalk.green(`  ✅ Task #${issue.number} sincronizada com sucesso!`));
+              updated++;
+            }
+          } else {
+            console.log(chalk.red(`⚠️ ERRO: Arquivo da task não encontrado após atualização: ${taskPath}`));
+            failed++;
+          }
+        } else {
+          console.log(chalk.red(`⚠️ ERRO: Falha ao atualizar task #${issue.number}`));
+          failed++;
         }
-
-        updated++;
       } else {
         // Criar nova task
         console.log(chalk.blue(`- Criando task para issue #${issue.number}: ${issue.title}`));
@@ -417,7 +547,11 @@ async function pullFromGitHub() {
       }
     }
 
-    console.log(chalk.green(`✅ Sincronização concluída: ${updated} tasks atualizadas, ${created} tasks criadas.`));
+    console.log(
+      chalk.green(
+        `✅ Sincronização concluída: ${updated} tasks atualizadas, ${created} tasks criadas, ${deleted} tasks marcadas como excluídas, ${failed} falhas.`
+      )
+    );
   } catch (error) {
     console.error(chalk.red("❌ Erro ao buscar issues do GitHub:"), error);
   }
