@@ -37,11 +37,24 @@ export class ContextManager {
       {
         role: "system",
         content:
-          "Você é um assistente de desenvolvimento integrado ao DevTask CLI. " +
-          "Você pode ajudar com gerenciamento de tarefas, integração com GitHub, " +
-          "exploração e modificação de arquivos, e geração de código. " +
-          "Tente entender as solicitações em linguagem natural e ser útil mesmo " +
-          "quando as instruções não são totalmente claras.",
+          "Você é um assistente de desenvolvimento amigável integrado ao DevTask CLI. " +
+          "Você deve interpretar comandos em linguagem natural e convertê-los em ações no sistema. " +
+          "Você pode entender e responder a pedidos mesmo quando expressos em linguagem coloquial. " +
+          "\n\n" +
+          "Suas capacidades incluem:\n" +
+          "- Gerenciar tarefas: criar, listar, atualizar ou excluir tarefas\n" +
+          "- Trabalhar com GitHub: sincronizar tarefas com issues do GitHub\n" +
+          "- Explorar arquivos: navegar, ler e modificar arquivos do projeto\n" +
+          "- Gerar e modificar código: ajudar a escrever ou explicar código\n" +
+          "\n" +
+          "Exemplos de como os usuários podem te pedir coisas:\n" +
+          "- 'Quero ver minhas tarefas' = listar tarefas\n" +
+          "- 'Mostra o que tem na pasta src' = listar arquivos em src\n" +
+          "- 'Cria uma tarefa para implementar autenticação' = criar nova tarefa\n" +
+          "- 'O que tem no arquivo index.ts?' = ler conteúdo do arquivo\n" +
+          "\n" +
+          "Sempre interprete o que o usuário quer, mesmo quando as instruções forem ambíguas, " +
+          "e tente entender o contexto da conversa para dar continuidade às interações.",
       },
     ];
 
@@ -139,6 +152,21 @@ export class ContextManager {
    */
   getState(): Record<string, any> {
     return { ...this.currentState };
+  }
+
+  /**
+   * Fornece um resumo das capacidades do sistema em linguagem natural
+   * @returns Uma string descrevendo as capacidades do sistema
+   */
+  getCapabilities(): string {
+    return (
+      "Posso te ajudar com:\n\n" +
+      "🔹 Tarefas: criar, listar, atualizar ou excluir tarefas\n" +
+      "🔹 GitHub: sincronizar tarefas com issues do GitHub\n" +
+      "🔹 Arquivos: navegar, ler e modificar arquivos do projeto\n" +
+      "🔹 Código: gerar código, explicar trechos ou executar comandos\n\n" +
+      "Como posso te ajudar hoje?"
+    );
   }
 
   /**

@@ -13,11 +13,15 @@ export class DevTaskAgent {
   private intentProcessor: IntentProcessor;
   private actionRouter: ActionRouter;
   private contextManager: ContextManager;
+  private debugMode: boolean = false;
 
   constructor() {
     this.contextManager = new ContextManager();
     this.intentProcessor = new IntentProcessor();
     this.actionRouter = new ActionRouter(this.contextManager);
+
+    // Ativar modo de debug se a variável de ambiente estiver definida
+    this.debugMode = process.env.DEBUG_INTENT === "true";
   }
 
   /**
@@ -36,6 +40,10 @@ export class DevTaskAgent {
     // Mensagem inicial do sistema para o contexto
     this.contextManager.initialize();
 
+    // Mostrar as capacidades do sistema
+    console.log(chalk.yellow(this.contextManager.getCapabilities()));
+    console.log("");
+
     let chatting = true;
     while (chatting) {
       const { userInput }: { userInput: string } = await inquirer.prompt([
@@ -51,6 +59,25 @@ export class DevTaskAgent {
       if (userInput.toLowerCase() === "exit" || userInput.toLowerCase() === "sair") {
         chatting = false;
         break;
+      }
+
+      // Comando de ajuda
+      if (userInput.toLowerCase() === "ajuda" || userInput.toLowerCase() === "help") {
+        console.log(chalk.yellow(this.contextManager.getCapabilities()));
+        continue;
+      }
+
+      // Ativar/desativar modo de debug
+      if (userInput.toLowerCase() === "debug on") {
+        this.debugMode = true;
+        console.log(chalk.magenta("Modo de debug ativado. As intenções detectadas serão exibidas."));
+        continue;
+      }
+
+      if (userInput.toLowerCase() === "debug off") {
+        this.debugMode = false;
+        console.log(chalk.magenta("Modo de debug desativado."));
+        continue;
       }
 
       console.log(chalk.blue("Processando..."));
@@ -81,6 +108,15 @@ export class DevTaskAgent {
 
       // Determinar a intenção do usuário
       const intent = await this.intentProcessor.process(message, this.contextManager.getRecentMessages());
+
+      // Log de debug se o modo estiver ativado
+      if (this.debugMode) {
+        console.log(chalk.magenta("\n📝 Intenção detectada:"));
+        console.log(chalk.magenta(`Tipo: ${intent.type}`));
+        console.log(chalk.magenta(`Ação: ${intent.action}`));
+        console.log(chalk.magenta(`Parâmetros: ${JSON.stringify(intent.parameters, null, 2)}`));
+        console.log(chalk.magenta("-----------------------------------"));
+      }
 
       // Executar a ação apropriada
       const response = await this.actionRouter.route(intent);

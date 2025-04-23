@@ -32,6 +32,9 @@ export class IntentProcessor {
    */
   async process(message: string, context: Array<{ role: string; content: string }>): Promise<Intent> {
     try {
+      // Realizar processamento preliminar para extrair caminhos de arquivos
+      const preprocessedMessage = this.preprocessMessage(message);
+
       // Preparar funções para a API da OpenAI
       const functions = this.getFunctions();
 
@@ -40,15 +43,42 @@ export class IntentProcessor {
         {
           role: "system" as const,
           content:
-            "Você é um assistente que analisa mensagens do usuário e identifica suas intenções. " +
+            "Você é um assistente inteligente especializado em entender comandos em linguagem natural para uma CLI de gerenciamento de tarefas de desenvolvimento. " +
+            "Sua função é interpretar o que o usuário quer fazer, mesmo quando a linguagem usada é informal ou ambígua. " +
             "Você deve extrair a intenção principal, a ação desejada e quaisquer parâmetros relevantes. " +
-            "Considere o contexto da conversa ao interpretar mensagens ambíguas ou curtas.",
+            "Considere o contexto da conversa ao interpretar mensagens ambíguas ou curtas." +
+            "\n\n" +
+            "Tipos de intenção que você deve identificar:\n" +
+            "- task: relacionada a tarefas de desenvolvimento (criar, listar, atualizar tarefas, etc.)\n" +
+            "- github: relacionada a interações com o GitHub (sincronizar, obter informações)\n" +
+            "- file: relacionada a arquivos e diretórios (listar, ler, mostrar estrutura)\n" +
+            "- code: relacionada a código (gerar, explicar, executar)\n" +
+            "- chat: conversas gerais, perguntas e respostas\n" +
+            "\n" +
+            "Exemplos de mapeamento para arquivos:\n" +
+            "- 'mostrar minhas tarefas' → {type: 'task', action: 'list'}\n" +
+            "- 'cria uma tarefa para implementar login' → {type: 'task', action: 'create', parameters: {title: 'Implementar login'}}\n" +
+            "- 'sincronizar com o github' → {type: 'github', action: 'sync'}\n" +
+            "- 'quais arquivos tem na pasta src' → {type: 'file', action: 'list', parameters: {path: 'src'}}\n" +
+            "- 'listar o diretório src/utils' → {type: 'file', action: 'list', parameters: {path: 'src/utils'}}\n" +
+            "- 'mostra o arquivo index.ts' → {type: 'file', action: 'read', parameters: {path: 'index.ts'}}\n" +
+            "- 'ler o arquivo src/index.ts' → {type: 'file', action: 'read', parameters: {path: 'src/index.ts'}}\n" +
+            "- 'mostra o conteúdo de src/commands/list.ts' → {type: 'file', action: 'read', parameters: {path: 'src/commands/list.ts'}}\n" +
+            "- 'gera um componente react' → {type: 'code', action: 'generate', parameters: {type: 'react-component'}}\n" +
+            "\n" +
+            "IMPORTANTE:\n" +
+            "1. Quando o usuário quer ler ou ver o conteúdo de um arquivo, a intenção é 'file' com ação 'read'.\n" +
+            "2. Quando o usuário quer ver arquivos em um diretório, a intenção é 'file' com ação 'list'.\n" +
+            "3. Sempre extraia o caminho do arquivo/diretório inteiro, incluindo extensões se presentes.\n" +
+            "4. NUNCA omita o caminho completo mencionado pelo usuário nos parâmetros.\n" +
+            "\n" +
+            "Seja flexível com a linguagem natural. Priorize o entendimento da intenção, mesmo quando o usuário não usa os termos exatos.",
         },
         ...context.map((msg) => ({
           role: msg.role as "user" | "assistant" | "system",
           content: msg.content,
         })),
-        { role: "user" as const, content: message },
+        { role: "user" as const, content: preprocessedMessage },
       ];
 
       // Chamar a API da OpenAI usando a biblioteca oficial
@@ -78,7 +108,8 @@ export class IntentProcessor {
         originalMessage: message,
       };
 
-      return intent;
+      // Aplicar correções adicionais se necessário
+      return this.postProcessIntent(intent, message);
     } catch (error: any) {
       console.error("Erro ao processar intenção:", error);
       // Fallback para intenção de chat genérica
@@ -89,6 +120,181 @@ export class IntentProcessor {
         originalMessage: message,
       };
     }
+  }
+
+  /**
+   * Faz processamento preliminar da mensagem para extrair contextos especiais como caminhos
+   */
+  private preprocessMessage(message: string): string {
+    // Adicionar informações de diagnóstico para ajudar a IA a extrair melhor os caminhos
+    return message;
+  }
+
+  /**
+   * Faz correções adicionais na intenção para casos que a IA não extrai corretamente
+   */
+  private postProcessIntent(intent: Intent, originalMessage: string): Intent {
+    // Normalizar a mensagem para processamento
+    const normalizedMessage = originalMessage.toLowerCase();
+
+    // Tratamento especial para comandos de listagem de diretórios
+    if (
+      normalizedMessage.includes("listar") ||
+      normalizedMessage.includes("mostrar") ||
+      normalizedMessage.includes("exibir") ||
+      normalizedMessage.includes("ver") ||
+      normalizedMessage.includes("o que tem")
+    ) {
+      if (
+        normalizedMessage.includes("pasta") ||
+        normalizedMessage.includes("diretório") ||
+        normalizedMessage.includes("diretorio") ||
+        normalizedMessage.includes("arquivos")
+      ) {
+        // É provavelmente uma intenção de listagem de diretório
+        intent.type = "file";
+        intent.action = "list";
+
+        // Tentar extrair o caminho do diretório
+        let directoryPath = this.extractDirectoryPath(normalizedMessage);
+        if (directoryPath) {
+          intent.parameters.path = directoryPath;
+        }
+
+        return intent;
+      }
+    }
+
+    // Tratamento especial para comandos de leitura de arquivos
+    if (
+      normalizedMessage.includes("ler") ||
+      normalizedMessage.includes("mostrar") ||
+      normalizedMessage.includes("conteúdo") ||
+      normalizedMessage.includes("abrir") ||
+      normalizedMessage.includes("cat")
+    ) {
+      if (normalizedMessage.includes("arquivo") || normalizedMessage.match(/\.[a-z]+\b/)) {
+        // Contém extensão de arquivo
+
+        // É provavelmente uma intenção de leitura de arquivo
+        intent.type = "file";
+        intent.action = "read";
+
+        // Tentar extrair o caminho do arquivo
+        let filePath = this.extractFilePath(normalizedMessage);
+        if (filePath) {
+          intent.parameters.path = filePath;
+        }
+
+        return intent;
+      }
+    }
+
+    // Se é uma ação relacionada a arquivos, verificar se o caminho foi extraído corretamente
+    if (intent.type === "file" && (intent.action === "read" || intent.action === "list")) {
+      // Se não temos um caminho nos parâmetros, tentar extrair manualmente
+      if (!intent.parameters.path) {
+        let extractedPath = null;
+
+        if (intent.action === "read") {
+          extractedPath = this.extractFilePath(normalizedMessage);
+        } else if (intent.action === "list") {
+          extractedPath = this.extractDirectoryPath(normalizedMessage);
+        }
+
+        if (extractedPath) {
+          intent.parameters.path = extractedPath;
+        }
+      }
+    }
+
+    return intent;
+  }
+
+  /**
+   * Extrai o caminho de um arquivo da mensagem
+   */
+  private extractFilePath(message: string): string | null {
+    // Expressões regulares para encontrar padrões de caminho de arquivo
+    const filePathPatterns = [
+      // Padrão para "arquivo X" ou "o arquivo X" com artigos
+      /(?:o\s+)?(?:arquivo|file)(?:\s+d[aoe])?(?:\s+a)?(?:\s+o)?\s+([a-zA-Z0-9_\-.\/]+)/i,
+
+      // Padrão para "ler X" ou "ver X" ou "mostrar X" ou "conteúdo de X"
+      /(?:ler|ver|mostrar|exibir|cat|abrir|conteúdo\s+d[aeo])\s+([a-zA-Z0-9_\-.\/]+)/i,
+
+      // Padrão para qualquer coisa que pareça um caminho de arquivo com extensão
+      /\b((?:\.{0,2}\/)?[a-zA-Z0-9_\-]+(?:\/[a-zA-Z0-9_\-]+)*\.[a-zA-Z0-9]+)\b/,
+
+      // Padrão mais genérico para capturar diretórios e arquivos
+      /\b((?:\.{0,2}\/)?[a-zA-Z0-9_\-]+(?:\/[a-zA-Z0-9_\-]+)+(?:\.[a-zA-Z0-9]+)?)\b/,
+
+      // Padrão mais simples para arquivos na raiz
+      /\b([a-zA-Z0-9_\-]+\.[a-zA-Z0-9]+)\b/,
+    ];
+
+    for (const pattern of filePathPatterns) {
+      const match = message.match(pattern);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extrai o caminho de um diretório da mensagem
+   */
+  private extractDirectoryPath(message: string): string | null {
+    // Limpar a mensagem de preposições para facilitar a extração
+    const cleaned = message
+      .replace(/no diretório/gi, "")
+      .replace(/na pasta/gi, "")
+      .replace(/do diretório/gi, "")
+      .replace(/da pasta/gi, "")
+      .replace(/em/gi, "")
+      .replace(/de/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // Expressões regulares para encontrar padrões de caminho de diretório
+    const dirPathPatterns = [
+      // Padrão para "diretório X" ou "pasta X" com artigos
+      /(?:o\s+)?(?:diretório|diretorio|pasta|directory|dir|folder)(?:\s+d[aoe])?(?:\s+a)?(?:\s+o)?\s+([a-zA-Z0-9_\-.\/]+)/i,
+
+      // Padrão para "listar X"
+      /(?:listar|list|ls|exibir|mostrar|ver)\s+([a-zA-Z0-9_\-.\/]+)/i,
+
+      // Padrão para "o que tem em X" ou "o que existe em X"
+      /(?:o\s+que\s+(?:tem|existe|há)\s+(?:em|no|na|nos|nas)\s+)([a-zA-Z0-9_\-.\/]+)/i,
+
+      // Padrão para qualquer coisa que pareça um caminho de diretório
+      /\b((?:\.{0,2}\/)?[a-zA-Z0-9_\-]+(?:\/[a-zA-Z0-9_\-]+)+)\b/,
+
+      // Padrão para diretórios simples
+      /\b(src|dist|public|app|test|tests|docs|config|scripts|components|pages|utils|lib|node_modules)\b/i,
+    ];
+
+    for (const pattern of dirPathPatterns) {
+      const match = cleaned.match(pattern);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+
+    // Verificar por termos específicos no final da mensagem
+    const terms = cleaned.split(/\s+/);
+    const lastTerm = terms[terms.length - 1];
+
+    if (lastTerm && !lastTerm.includes("arquivo") && !lastTerm.includes("diretório")) {
+      // Verificar se o último termo parece um caminho
+      if (lastTerm.includes("/") || lastTerm === "src" || lastTerm === "." || lastTerm === "..") {
+        return lastTerm;
+      }
+    }
+
+    return null;
   }
 
   /**

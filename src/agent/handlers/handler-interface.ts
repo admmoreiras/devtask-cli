@@ -46,6 +46,51 @@ export abstract class BaseHandler implements Handler {
    * @returns Mensagem de erro
    */
   protected getUnsupportedActionResponse(intent: Intent): string {
-    return `Desculpe, a ação "${intent.action}" não é suportada para intenções do tipo "${intent.type}".`;
+    // Criar uma resposta mais amigável e natural
+    const acoesSuportadas = this.getSupportedActionsForType(intent.type);
+
+    if (acoesSuportadas.length > 0) {
+      return `Ainda não sei como ${intent.action} ${this.getEntityNameForType(
+        intent.type
+      )}. Posso te ajudar com outras ações como: ${acoesSuportadas.join(", ")}.`;
+    }
+
+    return `Ainda não sei como te ajudar com isso. Tente perguntar sobre tarefas, arquivos, código ou outras funcionalidades do projeto.`;
+  }
+
+  /**
+   * Obtém o nome da entidade para um tipo de intenção
+   */
+  private getEntityNameForType(type: string): string {
+    switch (type) {
+      case "task":
+        return "tarefas";
+      case "github":
+        return "repositórios no GitHub";
+      case "file":
+        return "arquivos";
+      case "code":
+        return "código";
+      default:
+        return "isso";
+    }
+  }
+
+  /**
+   * Obtém uma lista de ações suportadas para um tipo de intenção em linguagem natural
+   */
+  private getSupportedActionsForType(type: string): string[] {
+    switch (type) {
+      case "task":
+        return ["criar tarefas", "listar tarefas", "atualizar tarefas"];
+      case "github":
+        return ["sincronizar com GitHub", "ver informações do GitHub"];
+      case "file":
+        return ["listar arquivos", "ler um arquivo", "visualizar a estrutura do projeto"];
+      case "code":
+        return ["gerar código", "explicar código", "executar código"];
+      default:
+        return [];
+    }
   }
 }

@@ -37,6 +37,9 @@ program
 program.command("clear-history").description("Limpar histórico de conversas do chat").action(clearHistory);
 
 // Novo comando para o agente interativo em linguagem natural
-program.command("agent").description("Iniciar agente interativo em linguagem natural").action(startAgent);
+program
+  .command("agent")
+  .description("Iniciar assistente inteligente com suporte a comandos em linguagem natural")
+  .action(startAgent);
 
 program.parse();

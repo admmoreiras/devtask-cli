@@ -254,6 +254,47 @@ devtask clear-history
 
 Limpa o histórico de conversas salvo em `~/.devtask-cli/history.json`.
 
+### Agente interativo em linguagem natural
+
+```bash
+devtask agent
+```
+
+Inicia um agente interativo que permite interagir com o sistema usando linguagem natural. Diferente do comando `chat`, o agente processa suas solicitações e realiza ações automaticamente dentro do sistema:
+
+- Conversação totalmente em linguagem natural, sem necessidade de comandos específicos
+- Interpretação inteligente de solicitações mesmo em linguagem coloquial
+- Suporte para todas as funcionalidades do sistema através de linguagem humana
+- Detecção automática de intenções para tarefas, GitHub, arquivos e código
+
+Exemplos de comandos que você pode usar:
+
+```
+> mostra a lista de tarefas
+> quais arquivos tem na pasta src
+> cria uma nova tarefa para implementar login
+> sincroniza com o GitHub
+> o que tem no arquivo index.ts
+```
+
+Para sair, basta digitar `sair` ou `exit`. Para ver a lista de capacidades, digite `ajuda` ou `help`.
+
+#### Modo de Debug
+
+O agente interativo possui um modo de debug que permite visualizar como ele está interpretando suas solicitações. Para usar:
+
+- Ative globalmente: Adicione `DEBUG_INTENT=true` no seu arquivo `.env`
+- Ative durante a sessão: Digite `debug on` durante a conversa
+- Desative durante a sessão: Digite `debug off`
+
+Quando o modo de debug está ativado, o agente mostrará:
+
+- O tipo de intenção detectada (tarefa, arquivo, GitHub, código)
+- A ação que ele identificou
+- Os parâmetros extraídos da sua mensagem
+
+Isso é útil para entender por que o agente não está respondendo como esperado ou para verificar se ele está entendendo corretamente suas solicitações em linguagem natural.
+
 ## Estrutura
 
 Tasks são armazenadas localmente no diretório `.task/issues` em formato JSON com as seguintes informações:
