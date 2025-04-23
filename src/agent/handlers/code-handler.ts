@@ -111,7 +111,7 @@ export class CodeHandler extends BaseHandler {
     // Preparar a explicação do código usando a API OpenAI
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
+        model: process.env.OPENAI_MODEL!,
         messages: [
           {
             role: "system",
@@ -160,7 +160,7 @@ export class CodeHandler extends BaseHandler {
 
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
+        model: process.env.OPENAI_MODEL!,
         messages: [
           {
             role: "system",
@@ -243,7 +243,7 @@ export class CodeHandler extends BaseHandler {
 
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
+        model: process.env.OPENAI_MODEL!,
         messages: [
           {
             role: "system",
@@ -317,7 +317,7 @@ export class CodeHandler extends BaseHandler {
 
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
+        model: process.env.OPENAI_MODEL!,
         messages: [
           {
             role: "system",

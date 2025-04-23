@@ -67,7 +67,7 @@ export async function generateTasksFromInstructions(template: Template): Promise
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4.1",
+      model: process.env.OPENAI_MODEL!,
       messages: [
         {
           role: "system",

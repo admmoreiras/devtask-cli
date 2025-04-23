@@ -75,7 +75,7 @@ Responda de forma clara, concisa e útil em português brasileiro. Se você não
 
       // Usar a biblioteca oficial do OpenAI
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4.1",
+        model: process.env.OPENAI_MODEL!,
         messages: [systemMessage, ...messages],
         temperature: 0.7,
         max_tokens: 1000,

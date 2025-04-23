@@ -85,7 +85,7 @@ export class IntentProcessor {
 
       // Chamar a API da OpenAI usando a biblioteca oficial
       const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
+        model: process.env.OPENAI_MODEL!,
         messages,
         functions,
         function_call: { name: "extract_intent" },

@@ -349,7 +349,7 @@ Comandos disponíveis:
       const response = await axios.post<OpenAIResponse>(
         "https://api.openai.com/v1/chat/completions",
         {
-          model: "gpt-4.1",
+          model: process.env.OPENAI_MODEL!,
           messages: messages.map((msg) => ({
             role: msg.role,
             content: msg.content,
