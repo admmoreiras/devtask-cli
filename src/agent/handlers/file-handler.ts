@@ -164,7 +164,7 @@ export class FileHandler extends BaseHandler {
    * Processa a ação de mostrar a estrutura de diretórios
    */
   private async handleStructure(intent: Intent): Promise<string> {
-    const path = intent.parameters.path || this.contextManager.getState().currentDirectory || ".";
+    const path = intent.parameters.path || this.contextManager.getCurrentDirectory() || ".";
     const depth = intent.parameters.depth || 3;
 
     if (!isPathSafe(path)) {
@@ -173,8 +173,20 @@ export class FileHandler extends BaseHandler {
 
     try {
       const structure = await getFileStructure(path, depth);
+
+      // Atualizar o estado com o diretório atual
+      this.contextManager.updateState({
+        type: "file",
+        action: "structure",
+        parameters: { path },
+        originalMessage: "",
+      });
+
       return `Estrutura de diretórios para "${path}":\n\n\`\`\`\n${structure}\n\`\`\``;
     } catch (error: any) {
+      if (error.message.includes("ENOENT")) {
+        return `O diretório "${path}" não existe. Por favor, verifique se o caminho está correto.`;
+      }
       return `Erro ao obter estrutura de diretórios: ${error.message}`;
     }
   }

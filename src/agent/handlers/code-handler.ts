@@ -1,8 +1,11 @@
 // Manipulador para operações relacionadas a código
+import dotenv from "dotenv";
 import OpenAI from "openai";
-import { executeCode } from "../../utils/code-executor.js";
+import { isPathSafe, readFile } from "../../utils/file-explorer.js";
 import { Intent } from "../intent-processor.js";
 import { BaseHandler } from "./handler-interface.js";
+
+dotenv.config();
 
 // Cliente OpenAI
 const openai = new OpenAI({
@@ -15,12 +18,11 @@ const openai = new OpenAI({
 export class CodeHandler extends BaseHandler {
   // Ações suportadas por este manipulador
   private supportedActions = [
+    "explain", // Explicar um trecho de código
     "generate", // Gerar código
     "execute", // Executar código
+    "refactor", // Refatorar código
     "analyze", // Analisar código
-    "explain", // Explicar código
-    "optimize", // Otimizar código
-    "debug", // Depurar código
   ];
 
   /**
@@ -37,23 +39,20 @@ export class CodeHandler extends BaseHandler {
     // Processar a ação
     try {
       switch (intent.action) {
+        case "explain":
+          return await this.handleExplain(intent);
+
         case "generate":
           return await this.handleGenerate(intent);
 
         case "execute":
           return await this.handleExecute(intent);
 
+        case "refactor":
+          return await this.handleRefactor(intent);
+
         case "analyze":
           return await this.handleAnalyze(intent);
-
-        case "explain":
-          return await this.handleExplain(intent);
-
-        case "optimize":
-          return await this.handleOptimize(intent);
-
-        case "debug":
-          return await this.handleDebug(intent);
 
         default:
           return `Operação de código não implementada: ${intent.action}`;
@@ -64,75 +63,209 @@ export class CodeHandler extends BaseHandler {
   }
 
   /**
-   * Processa a ação de gerar código
+   * Processa a ação de explicar código
    */
-  private async handleGenerate(intent: Intent): Promise<string> {
-    const { language, description, requirements } = intent.parameters;
+  private async handleExplain(intent: Intent): Promise<string> {
+    let filePath = intent.parameters.path;
+    let code = intent.parameters.code;
 
-    if (!description) {
-      return "Por favor, descreva o código que deseja gerar.";
+    // Se o código não foi fornecido diretamente e não temos um caminho,
+    // verificar se temos um arquivo no contexto
+    if (!code && !filePath) {
+      const currentFile = this.contextManager.getCurrentFile();
+      if (currentFile) {
+        filePath = currentFile;
+      } else {
+        return "Por favor, especifique qual código você gostaria que eu explicasse. Você pode fornecer o código diretamente ou o caminho para um arquivo.";
+      }
     }
 
+    // Se temos um caminho, ler o arquivo
+    if (filePath && !code) {
+      if (!isPathSafe(filePath)) {
+        return `⚠️ Acesso negado. O arquivo "${filePath}" é sensível ou está fora do projeto.`;
+      }
+
+      try {
+        code = await readFile(filePath);
+        if (code === null) {
+          return `Não consegui encontrar ou ler o arquivo "${filePath}". Por favor, verifique se o caminho está correto.`;
+        }
+      } catch (error: any) {
+        return `Não foi possível ler o arquivo "${filePath}": ${error.message}`;
+      }
+    }
+
+    if (!code) {
+      return "Não consegui identificar o código a ser explicado. Por favor, forneça o código ou especifique um arquivo válido.";
+    }
+
+    // Atualizar o estado com a operação atual
+    this.contextManager.updateState({
+      type: "code",
+      action: "explain",
+      parameters: { path: filePath },
+      originalMessage: "",
+    });
+
+    // Preparar a explicação do código usando a API OpenAI
     try {
-      // Criar uma solicitação para a API do OpenAI
-      const prompt = `Gere código ${language || "JavaScript/TypeScript"} para: ${description}
-${requirements ? `\nRequisitos adicionais: ${requirements}` : ""}`;
-
-      // Obter mensagens recentes para contexto
-      const messages = this.contextManager.getRecentMessages();
-
-      // Enviar solicitação para a API do OpenAI usando biblioteca oficial
       const response = await openai.chat.completions.create({
         model: "gpt-4.1",
         messages: [
           {
             role: "system",
             content:
-              "Você é um assistente especializado em gerar código de alta qualidade. Seu código deve ser limpo, bem documentado e seguir as melhores práticas.",
+              "Você é um assistente especializado em explicar código. " +
+              "Forneça explicações concisas, diretas e técnicas, focando na funcionalidade principal. " +
+              "Mencione padrões de design relevantes, bibliotecas utilizadas e qualquer detalhe importante de implementação. " +
+              "Seja objetivo e evite explicações desnecessariamente longas. Use linguagem técnica apropriada para desenvolvedores.",
           },
-          ...messages,
-          { role: "user", content: prompt },
+          {
+            role: "user",
+            content: `Explique o seguinte código de forma clara e concisa:\n\n\`\`\`\n${code}\n\`\`\``,
+          },
         ],
         temperature: 0.3,
+        max_tokens: 1500,
       });
 
-      // Verificar se a resposta contém o conteúdo esperado
-      if (!response.choices?.length || !response.choices[0]?.message?.content) {
-        return "Não foi possível gerar o código. Resposta inesperada da API.";
-      }
-
-      const generatedCode = response.choices[0].message.content;
-
-      // Retorna o código gerado
-      return `Código gerado para: ${description}\n\n${generatedCode}\n\nVocê pode modificar este código conforme necessário ou pedir para executá-lo digitando "execute este código".`;
+      return `📝 **Explicação do código${filePath ? ` em "${filePath}"` : ""}**:\n\n${
+        response.choices[0].message.content
+      }`;
     } catch (error: any) {
-      return `Erro ao gerar código: ${error.message}`;
+      console.error("Erro ao explicar código:", error);
+      return `Ocorreu um erro ao explicar o código: ${error.message}`;
     }
   }
 
   /**
-   * Processa a ação de executar código
+   * Processa a ação de gerar código
    */
-  private async handleExecute(intent: Intent): Promise<string> {
-    const { code } = intent.parameters;
+  private async handleGenerate(intent: Intent): Promise<string> {
+    const type = intent.parameters.type || "generic";
+    const description = intent.parameters.description || intent.originalMessage;
 
-    if (!code) {
-      return "Por favor, forneça o código que deseja executar.";
+    if (!description) {
+      return "Por favor, forneça uma descrição do código que você gostaria que eu gerasse.";
     }
 
+    // Atualizar o estado com a operação atual
+    this.contextManager.updateState({
+      type: "code",
+      action: "generate",
+      parameters: { type, description },
+      originalMessage: "",
+    });
+
     try {
-      // Extrair o código de um bloco de código se estiver presente
-      const codeToExecute = this.extractCodeFromMarkdown(code);
+      const response = await openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Você é um assistente especializado em gerar código de alta qualidade. " +
+              "Crie código que seja eficiente, bem estruturado e siga as melhores práticas. " +
+              "Inclua comentários relevantes explicando partes complexas. " +
+              "Se possível, forneça uma explicação breve sobre como o código funciona após gerá-lo.",
+          },
+          {
+            role: "user",
+            content: `Gere ${type !== "generic" ? `um ${type}` : "código"} que: ${description}`,
+          },
+        ],
+        temperature: 0.2,
+        max_tokens: 1500,
+      });
 
-      console.log("Executando código:\n");
-      console.log(codeToExecute);
-
-      // Executar o código
-      const result = await executeCode(codeToExecute);
-
-      return `Resultado da execução:\n\n\`\`\`\n${result}\n\`\`\``;
+      return `🧩 **Código Gerado**:\n\n${response.choices[0].message.content}`;
     } catch (error: any) {
-      return `Erro ao executar código: ${error.message}`;
+      console.error("Erro ao gerar código:", error);
+      return `Ocorreu um erro ao gerar o código: ${error.message}`;
+    }
+  }
+
+  /**
+   * Processo a ação de executar código (não implementado)
+   */
+  private async handleExecute(intent: Intent): Promise<string> {
+    return "A execução direta de código não está disponível no momento. Considere usar a funcionalidade de modificação de arquivos e executar o código manualmente.";
+  }
+
+  /**
+   * Processa a ação de refatorar código
+   */
+  private async handleRefactor(intent: Intent): Promise<string> {
+    let filePath = intent.parameters.path;
+    let code = intent.parameters.code;
+    const instructions =
+      intent.parameters.instructions || "Refatore o código para melhorar a legibilidade e eficiência.";
+
+    // Se o código não foi fornecido diretamente e não temos um caminho,
+    // verificar se temos um arquivo no contexto
+    if (!code && !filePath) {
+      const currentFile = this.contextManager.getCurrentFile();
+      if (currentFile) {
+        filePath = currentFile;
+      } else {
+        return "Por favor, especifique qual código você gostaria que eu refatorasse. Você pode fornecer o código diretamente ou o caminho para um arquivo.";
+      }
+    }
+
+    // Se temos um caminho, ler o arquivo
+    if (filePath && !code) {
+      if (!isPathSafe(filePath)) {
+        return `⚠️ Acesso negado. O arquivo "${filePath}" é sensível ou está fora do projeto.`;
+      }
+
+      try {
+        code = await readFile(filePath);
+        if (code === null) {
+          return `Não consegui encontrar ou ler o arquivo "${filePath}". Por favor, verifique se o caminho está correto.`;
+        }
+      } catch (error: any) {
+        return `Não foi possível ler o arquivo "${filePath}": ${error.message}`;
+      }
+    }
+
+    if (!code) {
+      return "Não consegui identificar o código a ser refatorado. Por favor, forneça o código ou especifique um arquivo válido.";
+    }
+
+    // Atualizar o estado com a operação atual
+    this.contextManager.updateState({
+      type: "code",
+      action: "refactor",
+      parameters: { path: filePath },
+      originalMessage: "",
+    });
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Você é um assistente especializado em refatorar código. " +
+              "Melhore a qualidade do código sem alterar sua funcionalidade. " +
+              "Foque em melhorar a legibilidade, eliminar código duplicado, " +
+              "aplicar padrões de design apropriados e otimizar performance quando possível.",
+          },
+          {
+            role: "user",
+            content: `Refatore o seguinte código com estas instruções: ${instructions}\n\n\`\`\`\n${code}\n\`\`\``,
+          },
+        ],
+        temperature: 0.2,
+        max_tokens: 1500,
+      });
+
+      return `🔄 **Código Refatorado**:\n\n${response.choices[0].message.content}`;
+    } catch (error: any) {
+      console.error("Erro ao refatorar código:", error);
+      return `Ocorreu um erro ao refatorar o código: ${error.message}`;
     }
   }
 
@@ -140,192 +273,75 @@ ${requirements ? `\nRequisitos adicionais: ${requirements}` : ""}`;
    * Processa a ação de analisar código
    */
   private async handleAnalyze(intent: Intent): Promise<string> {
-    const { code } = intent.parameters;
+    let filePath = intent.parameters.path;
+    let code = intent.parameters.code;
 
-    if (!code) {
-      return "Por favor, forneça o código que deseja analisar.";
+    // Se o código não foi fornecido diretamente e não temos um caminho,
+    // verificar se temos um arquivo no contexto
+    if (!code && !filePath) {
+      const currentFile = this.contextManager.getCurrentFile();
+      if (currentFile) {
+        filePath = currentFile;
+      } else {
+        return "Por favor, especifique qual código você gostaria que eu analisasse. Você pode fornecer o código diretamente ou o caminho para um arquivo.";
+      }
     }
 
+    // Se temos um caminho, ler o arquivo
+    if (filePath && !code) {
+      if (!isPathSafe(filePath)) {
+        return `⚠️ Acesso negado. O arquivo "${filePath}" é sensível ou está fora do projeto.`;
+      }
+
+      try {
+        code = await readFile(filePath);
+        if (code === null) {
+          return `Não consegui encontrar ou ler o arquivo "${filePath}". Por favor, verifique se o caminho está correto.`;
+        }
+      } catch (error: any) {
+        return `Não foi possível ler o arquivo "${filePath}": ${error.message}`;
+      }
+    }
+
+    if (!code) {
+      return "Não consegui identificar o código a ser analisado. Por favor, forneça o código ou especifique um arquivo válido.";
+    }
+
+    // Atualizar o estado com a operação atual
+    this.contextManager.updateState({
+      type: "code",
+      action: "analyze",
+      parameters: { path: filePath },
+      originalMessage: "",
+    });
+
     try {
-      // Extrair o código de um bloco de código se estiver presente
-      const codeToAnalyze = this.extractCodeFromMarkdown(code);
-
-      // Criar uma solicitação para a API do OpenAI
-      const prompt = `Analise o seguinte código e identifique possíveis problemas, melhorias e boas práticas:\n\n${codeToAnalyze}`;
-
-      // Enviar solicitação para a API do OpenAI
       const response = await openai.chat.completions.create({
         model: "gpt-4.1",
         messages: [
           {
             role: "system",
             content:
-              "Você é um revisor de código experiente. Analise o código fornecido e identifique problemas, potenciais bugs, oportunidades de melhoria e boas práticas que podem ser aplicadas.",
+              "Você é um assistente especializado em analisar código. " +
+              "Identifique possíveis problemas, bugs, vulnerabilidades de segurança " +
+              "e padrões de código que podem ser melhorados. " +
+              "Forneça uma análise técnica e objetiva, com recomendações práticas.",
           },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.3,
-      });
-
-      // Verificar se a resposta contém o conteúdo esperado
-      if (!response.choices?.length || !response.choices[0]?.message?.content) {
-        return "Não foi possível analisar o código. Resposta inesperada da API.";
-      }
-
-      const analysis = response.choices[0].message.content;
-
-      // Retorna a análise
-      return `Análise do código:\n\n${analysis}`;
-    } catch (error: any) {
-      return `Erro ao analisar código: ${error.message}`;
-    }
-  }
-
-  /**
-   * Processa a ação de explicar código
-   */
-  private async handleExplain(intent: Intent): Promise<string> {
-    const { code } = intent.parameters;
-
-    if (!code) {
-      return "Por favor, forneça o código que deseja explicar.";
-    }
-
-    try {
-      // Extrair o código de um bloco de código se estiver presente
-      const codeToExplain = this.extractCodeFromMarkdown(code);
-
-      // Criar uma solicitação para a API do OpenAI
-      const prompt = `Explique o seguinte código de forma clara e detalhada:\n\n${codeToExplain}`;
-
-      // Enviar solicitação para a API do OpenAI
-      const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
-        messages: [
           {
-            role: "system",
-            content:
-              "Você é um professor de programação que explica código de forma clara e acessível. Explique o código fornecido linha por linha, destacando conceitos importantes e funcionalidades.",
+            role: "user",
+            content: `Analise o seguinte código e identifique potenciais problemas e melhorias:\n\n\`\`\`\n${code}\n\`\`\``,
           },
-          { role: "user", content: prompt },
         ],
-        temperature: 0.3,
+        temperature: 0.2,
+        max_tokens: 1500,
       });
 
-      // Verificar se a resposta contém o conteúdo esperado
-      if (!response.choices?.length || !response.choices[0]?.message?.content) {
-        return "Não foi possível explicar o código. Resposta inesperada da API.";
-      }
-
-      const explanation = response.choices[0].message.content;
-
-      // Retorna a explicação
-      return `Explicação do código:\n\n${explanation}`;
+      return `🔍 **Análise de Código${filePath ? ` em "${filePath}"` : ""}**:\n\n${
+        response.choices[0].message.content
+      }`;
     } catch (error: any) {
-      return `Erro ao explicar código: ${error.message}`;
+      console.error("Erro ao analisar código:", error);
+      return `Ocorreu um erro ao analisar o código: ${error.message}`;
     }
-  }
-
-  /**
-   * Processa a ação de otimizar código
-   */
-  private async handleOptimize(intent: Intent): Promise<string> {
-    const { code } = intent.parameters;
-
-    if (!code) {
-      return "Por favor, forneça o código que deseja otimizar.";
-    }
-
-    try {
-      // Extrair o código de um bloco de código se estiver presente
-      const codeToOptimize = this.extractCodeFromMarkdown(code);
-
-      // Criar uma solicitação para a API do OpenAI
-      const prompt = `Otimize o seguinte código, melhorando sua eficiência, legibilidade e organização:\n\n${codeToOptimize}`;
-
-      // Enviar solicitação para a API do OpenAI
-      const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
-        messages: [
-          {
-            role: "system",
-            content:
-              "Você é um especialista em otimização de código. Melhore o código fornecido, tornando-o mais eficiente, legível e aderente às melhores práticas. Explique as melhorias realizadas.",
-          },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.3,
-      });
-
-      // Verificar se a resposta contém o conteúdo esperado
-      if (!response.choices?.length || !response.choices[0]?.message?.content) {
-        return "Não foi possível otimizar o código. Resposta inesperada da API.";
-      }
-
-      const optimizedCode = response.choices[0].message.content;
-
-      // Retorna o código otimizado
-      return `Código otimizado:\n\n${optimizedCode}`;
-    } catch (error: any) {
-      return `Erro ao otimizar código: ${error.message}`;
-    }
-  }
-
-  /**
-   * Processa a ação de depurar código
-   */
-  private async handleDebug(intent: Intent): Promise<string> {
-    const { code, error } = intent.parameters;
-
-    if (!code) {
-      return "Por favor, forneça o código que deseja depurar.";
-    }
-
-    try {
-      // Extrair o código de um bloco de código se estiver presente
-      const codeToDebug = this.extractCodeFromMarkdown(code);
-
-      // Criar uma solicitação para a API do OpenAI
-      const prompt = `Depure o seguinte código e identifique possíveis erros:
-${codeToDebug}
-${error ? `\nErro reportado: ${error}` : ""}`;
-
-      // Enviar solicitação para a API do OpenAI
-      const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
-        messages: [
-          {
-            role: "system",
-            content:
-              "Você é um especialista em depuração de código. Identifique problemas no código fornecido, explique o que está causando os erros e sugira correções.",
-          },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.3,
-      });
-
-      // Verificar se a resposta contém o conteúdo esperado
-      if (!response.choices?.length || !response.choices[0]?.message?.content) {
-        return "Não foi possível depurar o código. Resposta inesperada da API.";
-      }
-
-      const debugResult = response.choices[0].message.content;
-
-      // Retorna o resultado da depuração
-      return `Resultado da depuração:\n\n${debugResult}`;
-    } catch (error: any) {
-      return `Erro ao depurar código: ${error.message}`;
-    }
-  }
-
-  /**
-   * Extrai código de um bloco de código Markdown
-   */
-  private extractCodeFromMarkdown(code: string): string {
-    // Verificar se o código está em um bloco de código
-    const codeBlockRegex = /```(?:\w+)?\s*([\s\S]+?)\s*```/;
-    const match = code.match(codeBlockRegex);
-
-    return match ? match[1] : code;
   }
 }

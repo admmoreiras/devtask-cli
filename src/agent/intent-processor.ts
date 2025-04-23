@@ -147,6 +147,21 @@ export class IntentProcessor {
     // Normalizar a mensagem para processamento
     const normalizedMessage = originalMessage.toLowerCase();
 
+    // Tratamento especial para solicitações de estrutura de projeto
+    if (
+      normalizedMessage.includes("estrutura do projeto") ||
+      normalizedMessage.includes("estrutura de arquivos") ||
+      normalizedMessage.includes("mostrar estrutura") ||
+      normalizedMessage.includes("ver estrutura") ||
+      (normalizedMessage.includes("listar") && normalizedMessage.includes("estrutura")) ||
+      (normalizedMessage.includes("mostrar") && normalizedMessage.includes("projeto"))
+    ) {
+      intent.type = "file";
+      intent.action = "structure";
+      intent.parameters.path = ".";
+      return intent;
+    }
+
     // Verificar referências a elementos no contexto (este arquivo, este diretório, etc.)
     if (
       normalizedMessage.includes("este arquivo") ||
@@ -172,7 +187,67 @@ export class IntentProcessor {
           intent.type = "file";
           intent.action = "read";
           intent.parameters.path = recentFile;
+        } else if (
+          normalizedMessage.includes("explicar") ||
+          normalizedMessage.includes("analisar") ||
+          normalizedMessage.includes("entender") ||
+          normalizedMessage.includes("explicação de")
+        ) {
+          intent.type = "code";
+          intent.action = "explain";
+          intent.parameters.path = recentFile;
         }
+      }
+    }
+
+    // Tratamento para comandos de listagem de diretórios sem caminho específico
+    if (
+      (normalizedMessage.includes("listar") ||
+        normalizedMessage.includes("list") ||
+        normalizedMessage.includes("ls") ||
+        normalizedMessage.includes("mostrar arquivos") ||
+        normalizedMessage.includes("mostrar diretórios") ||
+        normalizedMessage.includes("ver arquivos") ||
+        normalizedMessage.includes("ver diretórios")) &&
+      !intent.parameters.path
+    ) {
+      intent.type = "file";
+      intent.action = "list";
+
+      // Se mencionar "este diretório" ou similar, usar o diretório atual do contexto
+      if (
+        normalizedMessage.includes("este diretório") ||
+        normalizedMessage.includes("esse diretório") ||
+        normalizedMessage.includes("esta pasta") ||
+        normalizedMessage.includes("essa pasta") ||
+        normalizedMessage.includes("atual") ||
+        normalizedMessage.includes("aqui")
+      ) {
+        const recentDir = this.findMostRecentDirectoryReference(context);
+        intent.parameters.path = recentDir || ".";
+      } else {
+        // Usar diretório raiz como padrão quando não há caminho específico
+        intent.parameters.path = ".";
+      }
+
+      return intent;
+    }
+
+    // Tratamento para explicação de código sem especificar o arquivo
+    if (
+      (normalizedMessage.includes("explicar") ||
+        normalizedMessage.includes("explique") ||
+        normalizedMessage.includes("explicação do código") ||
+        normalizedMessage.includes("analisar código") ||
+        normalizedMessage.includes("explica")) &&
+      (normalizedMessage.includes("código") || normalizedMessage.includes("code"))
+    ) {
+      const recentFile = this.findMostRecentFileReference(context);
+      if (recentFile) {
+        intent.type = "code";
+        intent.action = "explain";
+        intent.parameters.path = recentFile;
+        return intent;
       }
     }
 
@@ -212,6 +287,10 @@ export class IntentProcessor {
         let directoryPath = this.extractDirectoryPath(normalizedMessage);
         if (directoryPath) {
           intent.parameters.path = directoryPath;
+        } else if (!intent.parameters.path) {
+          // Se não foi possível extrair um caminho e não temos um em parameters,
+          // usar o diretório atual como padrão
+          intent.parameters.path = ".";
         }
 
         return intent;
@@ -257,6 +336,9 @@ export class IntentProcessor {
 
         if (extractedPath) {
           intent.parameters.path = extractedPath;
+        } else {
+          // Se ainda não temos um caminho, usar o diretório atual
+          intent.parameters.path = ".";
         }
       }
     }
