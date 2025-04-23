@@ -267,42 +267,18 @@ async function pushToGitHub() {
         continue;
       }
 
-      // Verificar milestone antes de sincronizar
-      if (task.milestone && !milestones.has(task.milestone.toLowerCase())) {
-        const { createNewMilestone } = await inquirer.prompt([
-          {
-            type: "confirm",
-            name: "createNewMilestone",
-            message: `A milestone "${task.milestone}" não existe no GitHub. Deseja criá-la?`,
-            default: true,
-          },
-        ]);
+      // Flags para controlar se podemos prosseguir
+      let canProceed = true;
 
-        if (createNewMilestone) {
-          const milestoneId = await createMilestone(task.milestone);
-          if (!milestoneId) {
-            console.log(`⚠️ Não foi possível criar a milestone. A issue será criada sem milestone.`);
-            task.milestone = "";
-            // Atualizar o arquivo local
-            await fs.writeJSON(taskPath, task, { spaces: 2 });
-          }
-        } else {
-          console.log(`⚠️ A issue será criada sem milestone.`);
-          task.milestone = "";
-          // Atualizar o arquivo local
-          await fs.writeJSON(taskPath, task, { spaces: 2 });
-        }
-      }
-
-      // Verificar projeto antes de sincronizar
-      if (task.project) {
+      // 1. Primeiro verificar e criar o projeto se necessário
+      if (!task.project || task.project.trim() === "") {
+        console.log(chalk.yellow(`⚠️ A task "${task.title}" não tem projeto definido. Um projeto é obrigatório.`));
+        canProceed = false;
+      } else {
         // Verificar variantes do nome do projeto (com e sem '@')
         const projectName = task.project;
         const projectNameWithAt = projectName.startsWith("@") ? projectName : `@${projectName}`;
         const projectNameWithoutAt = projectName.startsWith("@") ? projectName.substring(1) : projectName;
-
-        // Imprimir informações para depuração
-        console.log(`\nVerificando projeto: "${projectName}"`);
 
         // Verificar se existe o projeto em qualquer um dos formatos (case insensitive)
         let projectExists = false;
@@ -317,38 +293,26 @@ async function pushToGitHub() {
           ) {
             projectExists = true;
             matchedProjectName = name;
-            console.log(`✅ Projeto encontrado como "${matchedProjectName}"`);
+            console.log(`✅ Projeto "${projectName}" encontrado como "${matchedProjectName}"`);
             break;
           }
         }
 
         if (!projectExists) {
-          console.log(`❌ Projeto não encontrado em nenhum formato`);
-          const { createNewProject } = await inquirer.prompt([
-            {
-              type: "confirm",
-              name: "createNewProject",
-              message: `O projeto "${projectName}" não existe no GitHub. Deseja criá-lo?`,
-              default: true,
-            },
-          ]);
+          console.log(`⚠️ O projeto "${projectName}" não existe no GitHub. Tentando criar automaticamente...`);
 
-          if (createNewProject) {
-            const projectId = await createProject(projectName);
-            if (!projectId) {
-              console.log(`⚠️ Não foi possível criar o projeto. A issue será criada sem projeto.`);
-              task.project = "";
-              // Atualizar o arquivo local
-              await fs.writeJSON(taskPath, task, { spaces: 2 });
-            } else {
-              // Atualizar o mapa de projetos para incluir o novo projeto
-              projects.set(projectName, projectId);
-            }
+          const projectId = await createProject(projectName, "", true);
+          if (!projectId) {
+            console.log(
+              chalk.red(`❌ Não foi possível criar o projeto "${projectName}". A tarefa não será sincronizada.`)
+            );
+            canProceed = false;
           } else {
-            console.log(`⚠️ A issue será criada sem projeto.`);
-            task.project = "";
-            // Atualizar o arquivo local
-            await fs.writeJSON(taskPath, task, { spaces: 2 });
+            console.log(`✅ Projeto "${projectName}" criado com sucesso (ID: ${projectId})`);
+            // Atualizar o mapa de projetos para incluir o novo projeto
+            projects.set(projectName, projectId);
+            // Se o projeto existir, garantir que usamos o nome correto
+            task.project = projectName;
           }
         } else {
           // Se o projeto existir, garantir que usamos o nome correto como está no GitHub
@@ -356,6 +320,43 @@ async function pushToGitHub() {
           task.project = matchedProjectName;
         }
       }
+
+      // 2. Verificar e criar a milestone se necessário (apenas se o projeto foi resolvido)
+      if (canProceed) {
+        if (!task.milestone || task.milestone.trim() === "") {
+          console.log(
+            chalk.yellow(`⚠️ A task "${task.title}" não tem milestone definida. Uma milestone é obrigatória.`)
+          );
+          canProceed = false;
+        } else if (!milestones.has(task.milestone.toLowerCase())) {
+          console.log(`⚠️ A milestone "${task.milestone}" não existe no GitHub. Tentando criar automaticamente...`);
+
+          const milestoneId = await createMilestone(task.milestone, "", true);
+          if (!milestoneId) {
+            console.log(
+              chalk.red(`❌ Não foi possível criar a milestone "${task.milestone}". A tarefa não será sincronizada.`)
+            );
+            canProceed = false;
+          } else {
+            console.log(`✅ Milestone "${task.milestone}" criada com sucesso (ID: ${milestoneId})`);
+            // Atualizar lista de milestones para futuras verificações
+            milestones.set(task.milestone.toLowerCase(), milestoneId);
+          }
+        } else {
+          console.log(`✅ Milestone "${task.milestone}" já existe no GitHub`);
+        }
+      }
+
+      // 3. Se não pudermos prosseguir, pular esta tarefa
+      if (!canProceed) {
+        console.log(chalk.yellow(`⚠️ A tarefa "${task.title}" não será sincronizada devido aos erros acima.`));
+        tasksSkipped++;
+        totalTasksProcessed++;
+        continue;
+      }
+
+      // Atualizar o arquivo local com quaisquer alterações feitas
+      await fs.writeJSON(taskPath, task, { spaces: 2 });
 
       // Verificar se a task já está sincronizada
       if (task.synced && task.github_issue_number) {

@@ -1465,7 +1465,11 @@ export async function fetchIssueProjectInfo(issueNumber: number): Promise<string
 }
 
 // Função para criar uma milestone no GitHub
-export async function createMilestone(title: string, description: string = ""): Promise<number | null> {
+export async function createMilestone(
+  title: string,
+  description: string = "",
+  silent: boolean = false
+): Promise<number | null> {
   try {
     const response = await octokit.rest.issues.createMilestone({
       owner: GITHUB_OWNER,
@@ -1476,7 +1480,9 @@ export async function createMilestone(title: string, description: string = ""): 
     });
 
     if (response.data.number) {
-      console.log(`✅ Milestone "${title}" criada com sucesso (ID: ${response.data.number})`);
+      if (!silent) {
+        console.log(`✅ Milestone "${title}" criada com sucesso (ID: ${response.data.number})`);
+      }
       return response.data.number;
     }
     return null;
@@ -1487,9 +1493,15 @@ export async function createMilestone(title: string, description: string = ""): 
 }
 
 // Função para criar um projeto no GitHub (ProjectV2)
-export async function createProject(title: string, description: string = ""): Promise<string | null> {
+export async function createProject(
+  title: string,
+  description: string = "",
+  silent: boolean = false
+): Promise<string | null> {
   try {
-    console.log(`\n🔍 Criando projeto "${title}" no GitHub...`);
+    if (!silent) {
+      console.log(`\n🔍 Criando projeto "${title}" no GitHub...`);
+    }
 
     // Se o título já tiver '@', vamos remover para padronizar
     const normalizedTitle = title.startsWith("@") ? title.substring(1) : title;
@@ -1507,7 +1519,9 @@ export async function createProject(title: string, description: string = ""): Pr
     try {
       const repoResponse: any = await octokit.graphql(repoQuery);
       repositoryId = repoResponse.repository.id;
-      console.log(`✅ Repositório encontrado (ID: ${repositoryId})`);
+      if (!silent) {
+        console.log(`✅ Repositório encontrado (ID: ${repositoryId})`);
+      }
     } catch (error) {
       console.error(`❌ Erro ao buscar ID do repositório:`, error);
       // Continuar mesmo sem o ID do repositório
@@ -1564,7 +1578,9 @@ export async function createProject(title: string, description: string = ""): Pr
 
     if (response?.createProjectV2?.projectV2?.id) {
       const projectId = response.createProjectV2.projectV2.id;
-      console.log(`✅ Projeto "${normalizedTitle}" criado com sucesso (ID: ${projectId})`);
+      if (!silent) {
+        console.log(`✅ Projeto "${normalizedTitle}" criado com sucesso (ID: ${projectId})`);
+      }
 
       // Vincular o projeto ao repositório se temos o ID do repositório
       if (repositoryId) {
@@ -1583,7 +1599,9 @@ export async function createProject(title: string, description: string = ""): Pr
           `;
 
           const linkResponse: any = await octokit.graphql(linkQuery);
-          console.log(`✅ Projeto vinculado ao repositório ${GITHUB_REPO}`);
+          if (!silent) {
+            console.log(`✅ Projeto vinculado ao repositório ${GITHUB_REPO}`);
+          }
         } catch (error) {
           console.error(`❌ Erro ao vincular projeto ao repositório:`, error);
           // Continuar mesmo com o erro de vinculação
@@ -1591,11 +1609,14 @@ export async function createProject(title: string, description: string = ""): Pr
       }
 
       // Buscar projetos novamente para atualizar o cache
-      console.log(`🔄 Atualizando cache de projetos...`);
+      if (!silent) {
+        console.log(`🔄 Atualizando cache de projetos...`);
+      }
       const projects = await fetchProjects();
 
       return projectId;
     }
+
     return null;
   } catch (error) {
     console.error(`❌ Erro ao criar projeto "${title}":`, error);

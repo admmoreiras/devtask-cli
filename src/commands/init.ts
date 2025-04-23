@@ -36,6 +36,68 @@ seu propósito e contexto. Quanto mais detalhada for a descrição, melhor será
 IMPORTANTE: Substitua todas as informações acima pelas especificações reais do seu projeto. 
 Quanto mais detalhado for este documento, melhores serão as tarefas geradas pela IA.`;
 
+// Função para obter projetos existentes
+async function getExistingProjects(): Promise<string[]> {
+  try {
+    const projects = new Set<string>();
+
+    // 1. Buscar projetos nos arquivos de tarefas
+    const issuesDir = path.join(".task", "issues");
+    console.log(`Procurando projetos em tarefas: ${issuesDir}`);
+
+    if (await fs.pathExists(issuesDir)) {
+      const files = await fs.readdir(issuesDir);
+      const issueFiles = files.filter((file) => file.endsWith(".json"));
+      console.log(`Encontrados ${issueFiles.length} arquivos de issues`);
+
+      for (const file of issueFiles) {
+        try {
+          const issuePath = path.join(issuesDir, file);
+          const issue = await fs.readJSON(issuePath);
+          if (issue.project) {
+            projects.add(issue.project);
+          }
+        } catch (error) {
+          console.error(`Erro ao ler arquivo ${file}:`, error);
+        }
+      }
+    }
+
+    // 2. Buscar projetos nos templates existentes
+    const templatesDir = path.join(".task", "templates");
+    console.log(`Procurando projetos em templates: ${templatesDir}`);
+
+    if (await fs.pathExists(templatesDir)) {
+      const files = await fs.readdir(templatesDir);
+      const templateFiles = files.filter((file) => file.endsWith(".json"));
+      console.log(`Encontrados ${templateFiles.length} arquivos de templates`);
+
+      for (const file of templateFiles) {
+        try {
+          const templatePath = path.join(templatesDir, file);
+          const template = await fs.readJSON(templatePath);
+          if (template.project) {
+            projects.add(template.project);
+            console.log(`Projeto encontrado no template ${file}: ${template.project}`);
+          }
+        } catch (error) {
+          console.error(`Erro ao ler template ${file}:`, error);
+        }
+      }
+    }
+
+    const projectList = Array.from(projects);
+    console.log(`Total de projetos encontrados: ${projectList.length}`);
+    if (projectList.length > 0) {
+      console.log(`Projetos: ${projectList.join(", ")}`);
+    }
+    return projectList;
+  } catch (error) {
+    console.error("Erro ao obter projetos:", error);
+    return [];
+  }
+}
+
 export async function initTemplate() {
   const templatesDir = path.join(".task", "templates");
   await fs.ensureDir(templatesDir);
@@ -133,10 +195,65 @@ export async function initTemplate() {
   // Atualizar a descrição do template
   template.description = description;
 
+  // Obter projetos existentes
+  const existingProjects = await getExistingProjects();
+
+  // Configuração do projeto
+  console.log("\n=== Configuração do Projeto ===");
+  console.log("Todos as tarefas geradas a partir deste template serão associadas ao projeto selecionado.\n");
+
+  // Exibir os projetos existentes, se houver
+  if (existingProjects.length > 0) {
+    console.log(`Projetos disponíveis: ${existingProjects.join(", ")}\n`);
+  }
+
+  let projectChoices = [{ name: "Criar um novo projeto", value: "create" }];
+
+  if (existingProjects.length > 0) {
+    projectChoices.unshift({ name: "Selecionar um projeto existente", value: "select" });
+  }
+
+  const { projectAction } = await inquirer.prompt([
+    {
+      type: "list",
+      name: "projectAction",
+      message: "O que você deseja fazer com o projeto?",
+      choices: projectChoices,
+    },
+  ]);
+
+  if (projectAction === "select") {
+    const { selectedProject } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "selectedProject",
+        message: "Selecione o projeto:",
+        choices: existingProjects,
+      },
+    ]);
+    template.project = selectedProject;
+  } else {
+    const { newProject } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "newProject",
+        message: "Nome do novo projeto:",
+        validate: (input: string) => (input.trim() ? true : "O nome do projeto não pode estar vazio"),
+      },
+    ]);
+    template.project = newProject;
+  }
+
   // Para criar novo template ou resetar existente, usar o exemplo
   if (action === "create" || !template.instructions) {
     template.instructions = TEMPLATE_EXEMPLO;
   }
+
+  // Exibir informações antes de salvar
+  console.log("Dados do template antes de salvar:");
+  console.log(`- Nome: ${template.name}`);
+  console.log(`- Descrição: ${template.description}`);
+  console.log(`- Projeto: ${template.project || "não definido"}`);
 
   // Salvar o template
   const success = await saveTemplate(template, templateName);
@@ -147,6 +264,7 @@ export async function initTemplate() {
     await fs.writeFile(instructionsFile, template.instructions);
 
     console.log(`✅ Template ${action === "create" ? "criado" : "atualizado"} com sucesso!`);
+    console.log(`📊 Projeto definido: ${template.project}`);
     console.log(`\n📝 Um arquivo com instruções de exemplo foi criado em:`);
     console.log(`   ${instructionsFile}`);
     console.log(`\n⚠️  IMPORTANTE: Edite este arquivo com as instruções do seu projeto,`);

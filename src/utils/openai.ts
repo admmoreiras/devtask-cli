@@ -19,6 +19,7 @@ export interface Template {
   name: string;
   description: string;
   instructions: string;
+  project?: string; // Projeto padrão para todas as tarefas
   tasks?: TaskTemplate[];
 }
 
@@ -51,8 +52,20 @@ export async function saveTemplate(template: Template, templateName: string = "d
   try {
     const templatePath = path.join(".task", "templates", `${templateName}.json`);
     await fs.ensureDir(path.dirname(templatePath));
+
+    console.log("Salvando template com os seguintes dados:");
+    console.log(JSON.stringify(template, null, 2));
+
     await fs.writeJSON(templatePath, template, { spaces: 2 });
-    return true;
+
+    // Verificar se foi salvo corretamente
+    if (await fs.pathExists(templatePath)) {
+      const savedTemplate = await fs.readJSON(templatePath);
+      console.log("Template salvo verificado:");
+      console.log(JSON.stringify(savedTemplate, null, 2));
+      return true;
+    }
+    return false;
   } catch (error) {
     console.error("Erro ao salvar template:", error);
     return false;
@@ -66,6 +79,10 @@ export async function generateTasksFromInstructions(template: Template): Promise
   }
 
   try {
+    const promptContent = template.project
+      ? `Com base nas seguintes instruções de projeto, crie uma lista estruturada de tarefas. Cada tarefa deve ter um título claro, descrição detalhada, e ser associada ao projeto "${template.project}" e milestone/sprint apropriados:\n\n${template.instructions}\n\nRetorne a resposta como um array JSON com objetos no seguinte formato: { "title": "string", "description": "string", "project": "${template.project}", "milestone": "string", "status": "todo" }`
+      : `Com base nas seguintes instruções de projeto, crie uma lista estruturada de tarefas. Cada tarefa deve ter um título claro, descrição detalhada, e ser associada a um projeto/componente e milestone/sprint apropriados:\n\n${template.instructions}\n\nRetorne a resposta como um array JSON com objetos no seguinte formato: { "title": "string", "description": "string", "project": "string", "milestone": "string", "status": "todo" }`;
+
     const response = await openai.chat.completions.create({
       model: "gpt-4.1",
       messages: [
@@ -75,7 +92,7 @@ export async function generateTasksFromInstructions(template: Template): Promise
         },
         {
           role: "user",
-          content: `Com base nas seguintes instruções de projeto, crie uma lista estruturada de tarefas. Cada tarefa deve ter um título claro, descrição detalhada, e ser associada a um projeto/componente e milestone/sprint apropriados:\n\n${template.instructions}\n\nRetorne a resposta como um array JSON com objetos no seguinte formato: { "title": "string", "description": "string", "project": "string", "milestone": "string", "status": "todo" }`,
+          content: promptContent,
         },
       ],
       temperature: 0.7,
@@ -91,6 +108,17 @@ export async function generateTasksFromInstructions(template: Template): Promise
     }
 
     const parsedTasks = JSON.parse(jsonMatch[0]) as TaskTemplate[];
+
+    // Garante que todas as tarefas tenham o projeto correto, se definido no template
+    if (template.project) {
+      console.log(`Forçando todas as tarefas a usarem o projeto: "${template.project}"`);
+      parsedTasks.forEach((task) => {
+        const projetoAnterior = task.project;
+        task.project = template.project!;
+        console.log(`Tarefa "${task.title}": projeto alterado de "${projetoAnterior}" para "${task.project}"`);
+      });
+    }
+
     return parsedTasks;
   } catch (error) {
     console.error("Erro ao gerar tarefas com IA:", error);

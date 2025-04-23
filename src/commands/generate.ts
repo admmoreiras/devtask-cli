@@ -35,6 +35,11 @@ export async function generateTasks() {
   }
 
   console.log(`📝 Gerando tarefas a partir do template '${template.name}'...`);
+  if (template.project) {
+    console.log(`🔍 Projeto definido no template: "${template.project}"`);
+  } else {
+    console.log(`⚠️ Nenhum projeto definido no template. As tarefas receberão projetos variados.`);
+  }
   console.log("🤖 Aguarde enquanto a IA processa as instruções...");
 
   try {
@@ -49,6 +54,9 @@ export async function generateTasks() {
 
     // Confirmar geração
     console.log(`✅ ${tasks.length} tarefas geradas!`);
+    if (template.project) {
+      console.log(`📊 Todas as tarefas estão associadas ao projeto "${template.project}"`);
+    }
 
     const { showTasks } = await inquirer.prompt([
       {
@@ -96,7 +104,9 @@ async function saveTasks(tasks: TaskTemplate[]) {
   const issuesDir = path.join(".task", "issues");
   await fs.ensureDir(issuesDir);
 
-  const savePromises = tasks.map(async (task) => {
+  console.log(`Salvando ${tasks.length} tarefas no diretório: ${issuesDir}`);
+
+  const savePromises = tasks.map(async (task, index) => {
     const slug = task.title
       .toLowerCase()
       .replace(/\s+/g, "-")
@@ -113,7 +123,10 @@ async function saveTasks(tasks: TaskTemplate[]) {
       lastSyncAt: new Date().toISOString(),
     };
 
-    await saveJson(path.join(issuesDir, `${id}-${slug}.json`), taskData);
+    const filePath = path.join(issuesDir, `${id}-${slug}.json`);
+    console.log(`Tarefa ${index + 1}: Salvando em ${filePath} com projeto: ${taskData.project}`);
+
+    await saveJson(filePath, taskData);
     return taskData;
   });
 
