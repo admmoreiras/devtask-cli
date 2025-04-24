@@ -3,10 +3,12 @@ import { Command } from "commander";
 import { startAgent } from "./agent/index.js"; // Importar o novo agente interativo
 import { startChat } from "./commands/chat.js";
 import { createTask } from "./commands/create.js";
+import { executeTask } from "./commands/execute.js";
 import { generateTasks } from "./commands/generate.js";
 import { showGitHubInfo } from "./commands/info.js";
 import { initTemplate } from "./commands/init.js";
 import { listTasks } from "./commands/list.js";
+import { nextTasks } from "./commands/next.js";
 import { syncTasks } from "./commands/sync.js";
 import { updateTemplate } from "./commands/update-template.js";
 import { clearHistory } from "./utils/history.js";
@@ -26,6 +28,23 @@ program
   .argument("[name]", "Nome do template (default se omitido)")
   .action(updateTemplate);
 program.command("generate").description("Gerar tasks a partir do template usando IA").action(generateTasks);
+
+// Comando para exibir próxima sprint
+program
+  .command("next")
+  .description("Exibir próxima sprint e tarefas pendentes")
+  .option("--execute", "Executar a primeira tarefa pendente")
+  .action((options) => nextTasks(options));
+
+// Comando para executar tarefas
+program
+  .command("execute")
+  .description("Executar uma tarefa específica")
+  .option("-n, --number <number>", "Número da issue a ser executada")
+  .option("--auto", "Executar automaticamente sem interação")
+  .action((options) =>
+    executeTask({ issueNumber: options.number ? parseInt(options.number, 10) : 0, auto: options.auto })
+  );
 
 // Comando para chat interativo com IA
 program
