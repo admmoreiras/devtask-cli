@@ -3,7 +3,7 @@ import Table from "cli-table3";
 import dotenv from "dotenv";
 import fs from "fs-extra";
 import * as path from "path";
-import { Task } from "../utils/github.js";
+import { Task } from "../utils/github/types.js";
 
 // Carregar variáveis de ambiente
 dotenv.config();

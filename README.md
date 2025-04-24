@@ -99,6 +99,30 @@ A sincronização agora oferece:
 - Detecção case-insensitive de projetos e milestones
 - Logs detalhados do processo de sincronização
 - Arquivos de tasks renomeados com prefixo do número da issue (#)
+- Atualização automática de status em projetos GitHub
+
+### Próximas tarefas e execução
+
+```bash
+devtask next
+```
+
+Lista as próximas tarefas a serem executadas, organizadas por sprint:
+
+- Organização automática de sprints por sequência numérica
+- Exibição de progresso (tarefas concluídas vs. pendentes)
+- Links clicáveis para as issues no GitHub
+
+```bash
+devtask execute [número-da-issue]
+```
+
+Permite selecionar uma tarefa para execução e alterar seu status:
+
+- Iniciar trabalho (mudar para 'In Progress')
+- Marcar como concluída (mudar para 'Done')
+- Retornar para pendente (mudar para 'Todo')
+- Adicionar comentários diretamente nas issues
 
 ### Informações do GitHub
 
@@ -271,18 +295,6 @@ Inicia um agente interativo que permite interagir com o sistema usando linguagem
 - Detecção automática de intenções para tarefas, GitHub, arquivos e código
 - **NOVO**: Melhor compreensão do contexto da conversa para referências a arquivos e diretórios
 
-Exemplos de comandos que você pode usar:
-
-```
-> mostra a lista de tarefas
-> quais arquivos tem na pasta src
-> cria uma nova tarefa para implementar login
-> sincroniza com o GitHub
-> o que tem no arquivo index.ts
-> modifica esse arquivo para adicionar um novo comando
-> mostra os arquivos da pasta onde está esse arquivo
-```
-
 Para sair, basta digitar `sair` ou `exit`. Para ver a lista de capacidades, digite `ajuda` ou `help`.
 
 #### Modo de Debug
@@ -293,15 +305,9 @@ O agente interativo possui um modo de debug que permite visualizar como ele est�
 - Ative durante a sessão: Digite `debug on` durante a conversa
 - Desative durante a sessão: Digite `debug off`
 
-Quando o modo de debug está ativado, o agente mostrará:
+## Estrutura do Projeto
 
-- O tipo de intenção detectada (tarefa, arquivo, GitHub, código)
-- A ação que ele identificou
-- Os parâmetros extraídos da sua mensagem
-
-Isso é útil para entender por que o agente não está respondendo como esperado ou para verificar se ele está entendendo corretamente suas solicitações em linguagem natural.
-
-## Estrutura
+### Arquivos de Tasks
 
 Tasks são armazenadas localmente no diretório `.task/issues` em formato JSON com as seguintes informações:
 
@@ -314,21 +320,11 @@ Tasks são armazenadas localmente no diretório `.task/issues` em formato JSON c
   "project": "Frontend",
   "status": "todo",
   "synced": true,
-  "github_issue_number": 42
+  "github_issue_number": 42,
+  "lastSyncAt": "2023-07-01T12:00:00Z",
+  "state": "open"
 }
 ```
-
-Os templates são armazenados no diretório `.task/templates` em formato JSON com a seguinte estrutura:
-
-```json
-{
-  "name": "default",
-  "description": "Template padrão para geração de tarefas",
-  "instructions": "Instruções detalhadas do projeto..."
-}
-```
-
-As conversas com a IA são armazenadas em `~/.devtask-cli/history.json`.
 
 Os arquivos de tarefas são nomeados seguindo o padrão:
 
@@ -337,13 +333,24 @@ Os arquivos de tarefas são nomeados seguindo o padrão:
 
 Onde `NUMERO` é o número da issue no GitHub.
 
-## Segurança no explorador de arquivos e File Agent
+### Arquitetura Modular
 
-O explorador de arquivos e o File Agent incluem medidas de segurança para garantir que:
+A CLI utiliza uma arquitetura modular para facilitar a manutenção:
 
-- Apenas arquivos dentro do diretório do projeto sejam acessíveis
-- Arquivos e diretórios sensíveis (como `.env`, `.git`, `node_modules`) sejam bloqueados
-- Informações sigilosas não sejam compartilhadas com a IA
+- **src/utils/github/**
+
+  - **index.js**: Ponto de entrada centralizado
+  - **auth.js**: Autenticação e configuração
+  - **issues.js**: Gestão de issues
+  - **milestones.js**: Gestão de milestones
+  - **projects.js**: Gestão de projetos
+  - **tasks.js**: Conversão entre tasks locais e issues
+  - **types.js**: Definições de tipos
+  - **projects-helpers.js**: Funções auxiliares para projetos
+
+- **src/commands/**: Implementação dos comandos da CLI
+- **src/agent/**: Sistema de agente de linguagem natural
+- **src/types/**: Definições de tipos adicionais
 
 ## Desenvolvimento
 
@@ -355,6 +362,8 @@ npm run dev -- [comando]
 npm run dev -- create
 npm run dev -- list
 npm run dev -- sync
+npm run dev -- next
+npm run dev -- execute
 npm run dev -- init
 npm run dev -- generate
 npm run dev -- chat

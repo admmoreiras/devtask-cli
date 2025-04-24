@@ -1,15 +1,15 @@
 import chalk from "chalk";
-import { listMilestones, listProjects } from "../utils/github.js";
+import github from "../utils/github/index.js";
 
 export async function showGitHubInfo() {
   try {
     console.log(chalk.blue("🔍 Buscando informações do GitHub..."));
 
     // Listar milestones
-    await listMilestones();
+    await github.listMilestones();
 
     // Listar projetos
-    await listProjects();
+    await github.listProjects();
 
     console.log("\n✅ Informações carregadas com sucesso!");
   } catch (error) {

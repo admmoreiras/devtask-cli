@@ -1,5 +1,5 @@
 // Manipulador para operações relacionadas ao GitHub
-import { fetchGitHubIssues, fetchMilestones, fetchProjects } from "../../utils/github.js";
+import github from "../../utils/github/index.js";
 import { Intent } from "../intent-processor.js";
 import { BaseHandler } from "./handler-interface.js";
 
@@ -54,7 +54,7 @@ export class GitHubHandler extends BaseHandler {
    */
   private async handleListIssues(): Promise<string> {
     try {
-      const issues = await fetchGitHubIssues();
+      const issues = await github.fetchGitHubIssues();
 
       if (!issues || issues.length === 0) {
         return "Nenhuma issue encontrada no GitHub.";
@@ -78,7 +78,7 @@ export class GitHubHandler extends BaseHandler {
    */
   private async handleListMilestones(): Promise<string> {
     try {
-      const milestones = await fetchMilestones();
+      const milestones = await github.fetchMilestones();
 
       if (!milestones || milestones.size === 0) {
         return "Nenhuma milestone encontrada no GitHub.";
@@ -102,7 +102,7 @@ export class GitHubHandler extends BaseHandler {
    */
   private async handleListProjects(): Promise<string> {
     try {
-      const projects = await fetchProjects();
+      const projects = await github.fetchProjects();
 
       if (!projects || projects.size === 0) {
         return "Nenhum projeto encontrado no GitHub.";
@@ -141,7 +141,7 @@ export class GitHubHandler extends BaseHandler {
 
       // Buscar milestones
       try {
-        const milestones = await fetchMilestones();
+        const milestones = await github.fetchMilestones();
         output += `## Milestones (${milestones.size})\n`;
 
         if (milestones.size === 0) {
@@ -158,7 +158,7 @@ export class GitHubHandler extends BaseHandler {
 
       // Buscar projetos
       try {
-        const projects = await fetchProjects();
+        const projects = await github.fetchProjects();
         output += `## Projetos (${projects.size})\n`;
 
         if (projects.size === 0) {

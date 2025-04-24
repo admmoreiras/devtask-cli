@@ -14,6 +14,7 @@ declare module "octokit" {
       };
       projects: {
         create(params: any): Promise<any>;
+        createForOrg(params: any): Promise<any>;
       };
       repos: {
         get(params: any): Promise<any>;
@@ -21,5 +22,6 @@ declare module "octokit" {
     };
 
     graphql<T>(query: string, params?: Record<string, any>): Promise<T>;
+    request(route: string, parameters?: Record<string, any>): Promise<any>;
   }
 }

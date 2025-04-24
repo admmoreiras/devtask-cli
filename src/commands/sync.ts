@@ -3,23 +3,8 @@ import Table from "cli-table3";
 import fs from "fs-extra";
 import inquirer from "inquirer";
 import path from "path";
-import {
-  Task,
-  createGitHubIssue,
-  createLocalTaskFromIssue,
-  createMilestone,
-  createProject,
-  extractStatusFromIssue,
-  fetchGitHubIssue,
-  fetchGitHubIssues,
-  fetchIssueProjectInfo,
-  fetchMilestones,
-  fetchProjects,
-  getTaskFilename,
-  updateGitHubIssue,
-  updateLocalTaskFromIssue,
-  updateTaskWithGitHubInfo,
-} from "../utils/github.js";
+import github from "../utils/github/index.js";
+import { Task } from "../utils/github/types.js";
 import { readAllFromDir } from "../utils/storage.js";
 
 // Função para sincronizar tarefas locais com GitHub
@@ -105,7 +90,7 @@ async function showTasksTable() {
         if (task.github_issue_number) {
           try {
             // Buscar issue para obter status atual do projeto
-            const issue = await fetchGitHubIssue(task.github_issue_number);
+            const issue = await github.fetchGitHubIssue(task.github_issue_number);
             if (issue) {
               // Atualizar estado da issue (open/closed/deleted)
               task.state = issue.state;
@@ -113,13 +98,13 @@ async function showTasksTable() {
               // Se a issue foi excluída, não tentar buscar informações adicionais
               if (issue.state !== "deleted") {
                 // Buscar projeto atualizado
-                const projectInfo = await fetchIssueProjectInfo(task.github_issue_number);
+                const projectInfo = await github.fetchIssueProjectInfo(task.github_issue_number);
                 if (projectInfo) {
                   task.project = projectInfo;
                 }
 
                 // Atualizar status com informações do projeto
-                const statusFromProject = await extractStatusFromIssue(issue);
+                const statusFromProject = await github.extractStatusFromIssue(issue);
                 if (statusFromProject) {
                   task.status = statusFromProject;
                 }
@@ -225,8 +210,8 @@ async function pushToGitHub() {
     console.log(chalk.blue(`🔄 Encontradas ${jsonFiles.length} tasks locais`));
 
     // Buscar milestones e projetos existentes para verificação
-    const milestones = await fetchMilestones();
-    const projects = await fetchProjects();
+    const milestones = await github.fetchMilestones();
+    const projects = await github.fetchProjects();
 
     // Variáveis para estatísticas
     let totalTasksProcessed = 0;
@@ -301,7 +286,7 @@ async function pushToGitHub() {
         if (!projectExists) {
           console.log(`⚠️ O projeto "${projectName}" não existe no GitHub. Tentando criar automaticamente...`);
 
-          const projectId = await createProject(projectName, "", true);
+          const projectId = await github.createProject(projectName, "", true);
           if (!projectId) {
             console.log(
               chalk.red(`❌ Não foi possível criar o projeto "${projectName}". A tarefa não será sincronizada.`)
@@ -331,7 +316,7 @@ async function pushToGitHub() {
         } else if (!milestones.has(task.milestone.toLowerCase())) {
           console.log(`⚠️ A milestone "${task.milestone}" não existe no GitHub. Tentando criar automaticamente...`);
 
-          const milestoneId = await createMilestone(task.milestone, "", true);
+          const milestoneId = await github.createMilestone(task.milestone, "", true);
           if (!milestoneId) {
             console.log(
               chalk.red(`❌ Não foi possível criar a milestone "${task.milestone}". A tarefa não será sincronizada.`)
@@ -363,7 +348,7 @@ async function pushToGitHub() {
         console.log(chalk.blue(`- Atualizando task "${task.title}" (Issue #${task.github_issue_number})...`));
 
         // Atualizar a issue existente
-        const updated = await updateGitHubIssue(task);
+        const updated = await github.updateGitHubIssue(task);
         if (updated) {
           console.log(chalk.green(`  ✅ Issue #${task.github_issue_number} atualizada com sucesso`));
           tasksUpdated++;
@@ -371,11 +356,11 @@ async function pushToGitHub() {
       } else {
         // Criar issue no GitHub
         console.log(chalk.blue(`- Enviando nova task "${task.title}" para GitHub...`));
-        const issueNumber = await createGitHubIssue(task);
+        const issueNumber = await github.createGitHubIssue(task);
 
         if (issueNumber) {
           // Atualizar task local com informações do GitHub
-          await updateTaskWithGitHubInfo(task, issueNumber);
+          await github.updateTaskWithGitHubInfo(task, issueNumber);
           console.log(chalk.green(`  ✅ Task "${task.title}" sincronizada como Issue #${issueNumber}`));
           tasksCreated++;
         }
@@ -401,7 +386,7 @@ async function pullFromGitHub() {
     console.log(chalk.blue("🔄 Buscando issues do GitHub..."));
 
     // Buscar todas as issues
-    const issues = (await fetchGitHubIssues()) || [];
+    const issues = (await github.fetchGitHubIssues()) || [];
 
     if (issues.length === 0) {
       console.log(chalk.yellow("⚠️ Nenhuma issue encontrada no GitHub."));
@@ -453,7 +438,7 @@ async function pullFromGitHub() {
         task.lastSyncAt = new Date().toISOString();
 
         // Salvar a task atualizada com o novo status
-        const taskPath = path.join(".task/issues", getTaskFilename(task));
+        const taskPath = path.join(".task/issues", github.getTaskFilename(task));
         await fs.writeJSON(taskPath, task, { spaces: 2 });
 
         console.log(chalk.green(`✅ Task local atualizada para status "deleted"`));
@@ -480,12 +465,12 @@ async function pullFromGitHub() {
         // Valores esperados do GitHub
         const expectedValues = {
           milestone: issue.milestone?.title || "",
-          status: await extractStatusFromIssue(issue),
-          project: (await fetchIssueProjectInfo(issue.number)) || "",
+          status: await github.extractStatusFromIssue(issue),
+          project: (await github.fetchIssueProjectInfo(issue.number)) || "",
         };
 
         // Atualizar a task local com os dados do GitHub
-        const wasUpdated = await updateLocalTaskFromIssue(currentTask, issue);
+        const wasUpdated = await github.updateLocalTaskFromIssue(currentTask, issue);
 
         if (wasUpdated) {
           // Verificar se a atualização realmente aconteceu
@@ -543,7 +528,7 @@ async function pullFromGitHub() {
       } else {
         // Criar nova task
         console.log(chalk.blue(`- Criando task para issue #${issue.number}: ${issue.title}`));
-        await createLocalTaskFromIssue(issue);
+        await github.createLocalTaskFromIssue(issue);
         created++;
       }
     }

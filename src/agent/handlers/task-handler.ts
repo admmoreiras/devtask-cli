@@ -1,7 +1,7 @@
 // Manipulador para operações relacionadas a tarefas
 import fs from "fs-extra";
 import path from "path";
-import { Task } from "../../utils/github.js";
+import { Task } from "../../utils/github/types.js";
 import { saveJson } from "../../utils/storage.js";
 import { Intent } from "../intent-processor.js";
 import { BaseHandler } from "./handler-interface.js";

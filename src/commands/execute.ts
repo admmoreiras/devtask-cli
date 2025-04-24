@@ -4,7 +4,8 @@ import dotenv from "dotenv";
 import fs from "fs-extra";
 import inquirer from "inquirer";
 import path from "path";
-import { Task, fetchGitHubIssue, getTaskFilename, updateGitHubIssue } from "../utils/github.js";
+import github from "../utils/github/index.js";
+import { Task } from "../utils/github/types.js";
 import { nextTasks } from "./next.js";
 
 // Carregar variáveis de ambiente
@@ -76,7 +77,7 @@ export const executeTask = async (options = { issueNumber: 0, auto: false }): Pr
       console.log(chalk.blue("Tentando buscar do GitHub..."));
 
       try {
-        const issue = await fetchGitHubIssue(options.issueNumber);
+        const issue = await github.fetchGitHubIssue(options.issueNumber);
         if (!issue) {
           console.log(chalk.red(`❌ Issue #${options.issueNumber} não encontrada no GitHub.`));
           return;
@@ -181,12 +182,12 @@ async function changeTaskStatus(task: Task, newStatus: string): Promise<void> {
     task.lastSyncAt = new Date().toISOString();
 
     // Salvar tarefa local
-    const taskPath = path.join(".task", "issues", getTaskFilename(task));
+    const taskPath = path.join(".task", "issues", github.getTaskFilename(task));
     await fs.writeJSON(taskPath, task, { spaces: 2 });
 
     // Sincronizar com GitHub
     if (task.github_issue_number) {
-      await updateGitHubIssue(task);
+      await github.updateGitHubIssue(task);
       console.log(chalk.green(`✅ Status atualizado com sucesso para "${newStatus}"`));
 
       // Verificar se os projetos no GitHub têm um campo de status

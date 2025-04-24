@@ -1,21 +1,15 @@
 import inquirer from "inquirer";
 import path from "path";
-import {
-  createMilestone,
-  createProject,
-  fetchMilestones,
-  fetchProjects,
-  fetchProjectStatusOptions,
-} from "../utils/github.js";
+import github from "../utils/github/index.js";
 import { saveJson } from "../utils/storage.js";
 
 export async function createTask() {
   // Buscar milestones e projetos existentes para verificação
-  const milestones = await fetchMilestones();
-  const projects = await fetchProjects();
+  const milestones = await github.fetchMilestones();
+  const projects = await github.fetchProjects();
 
   // Preparar lista de projetos para seleção
-  const projectChoices = Array.from(projects.keys()).map((name) => ({
+  const projectChoices = Array.from(projects.keys()).map((name: string) => ({
     name: name.startsWith("@") ? name.substring(1) : name, // Exibe sem @ na lista
     value: name, // Mantém o valor original para referência
   }));
@@ -27,7 +21,7 @@ export async function createTask() {
   });
 
   // Preparar lista de milestones para seleção
-  const milestoneChoices = Array.from(milestones.keys()).map((name) => ({
+  const milestoneChoices = Array.from(milestones.keys()).map((name: string) => ({
     name: name.charAt(0).toUpperCase() + name.slice(1), // Capitalize o nome da milestone
     value: name,
   }));
@@ -73,7 +67,7 @@ export async function createTask() {
     ]);
 
     if (newProjectName && newProjectName.trim() !== "") {
-      projectId = await createProject(newProjectName);
+      projectId = await github.createProject(newProjectName);
       if (projectId) {
         finalProject = newProjectName;
       } else {
@@ -93,7 +87,7 @@ export async function createTask() {
     ]);
 
     if (newMilestoneName && newMilestoneName.trim() !== "") {
-      const milestoneId = await createMilestone(newMilestoneName);
+      const milestoneId = await github.createMilestone(newMilestoneName);
       if (milestoneId) {
         finalMilestone = newMilestoneName;
       } else {
@@ -109,7 +103,7 @@ export async function createTask() {
 
   if (projectId) {
     try {
-      const projectStatusOptions = await fetchProjectStatusOptions(projectId);
+      const projectStatusOptions = await github.fetchProjectStatusOptions(projectId);
       if (projectStatusOptions && projectStatusOptions.length > 0) {
         statusChoices = projectStatusOptions;
       }

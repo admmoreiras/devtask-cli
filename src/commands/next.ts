@@ -3,7 +3,8 @@ import Table from "cli-table3";
 import dotenv from "dotenv";
 import fs from "fs-extra";
 import * as path from "path";
-import { Task, fetchGitHubIssue, updateLocalTaskFromIssue } from "../utils/github.js";
+import github from "../utils/github/index.js";
+import { Task } from "../utils/github/types.js";
 import { readAllFromDir } from "../utils/storage.js";
 import { executeTask as runTaskExecution } from "./execute.js";
 
@@ -81,9 +82,9 @@ async function updateTasksFromGitHub(tasks: Task[]): Promise<void> {
   for (const task of tasks) {
     if (task.github_issue_number) {
       try {
-        const issue = await fetchGitHubIssue(task.github_issue_number);
+        const issue = await github.fetchGitHubIssue(task.github_issue_number);
         if (issue && issue.state !== "deleted") {
-          await updateLocalTaskFromIssue(task, issue);
+          await github.updateLocalTaskFromIssue(task, issue);
         }
       } catch (error) {
         // Continuar mesmo se houver erro em uma tarefa específica
