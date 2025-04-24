@@ -357,61 +357,110 @@ async function addIssueToProject(issueNodeId: string, projectId: string): Promis
 // Função para criar issue no GitHub
 export async function createGitHubIssue(task: Task): Promise<number | null> {
   try {
-    // Primeiro buscar milestones para mapear nome -> número
-    const milestones = await fetchMilestones();
-    let milestoneNumber = undefined;
-
-    if (task.milestone) {
-      milestoneNumber = milestones.get(task.milestone.toLowerCase());
+    // Verificar se a task tem projeto e milestone
+    if (!task.project || !task.milestone) {
+      console.error(`❌ Task deve ter projeto e milestone definidos.`);
+      return null;
     }
 
-    // Preparar labels para status
-    const labels = [];
-    if (task.status) {
-      labels.push(`status:${task.status}`);
-    }
+    // Preparar labels
+    const labels = [`status:${task.status}`];
 
     // Adicionar informação de status e synced no corpo da issue
     let taskBody = task.description || "";
 
+    // Obter data/hora atual no formato ISO do GitHub
+    const now = new Date().toISOString();
+
     // Adicionar metadados ao final da descrição
     taskBody += `\n\n---\n`;
     taskBody += `**Status:** ${task.status}\n`;
-    taskBody += `**Sincronizado:** ${task.synced ? "Sim" : "Não"}\n`;
+    taskBody += `**Projeto:** ${task.project}\n`;
+    taskBody += `**Milestone:** ${task.milestone}\n`;
+    taskBody += `**Sincronizado:** Sim\n`;
     taskBody += `**ID Local:** ${task.id}\n`;
+    taskBody += `**Última Sincronização:** ${now}\n`;
 
-    // Criar a issue
+    // Buscar ID da milestone
+    const milestones = await fetchMilestones();
+    const milestone = Array.from(milestones.entries()).find(
+      ([name]) => name.toLowerCase() === task.milestone.toLowerCase()
+    );
+
+    let milestoneId = null;
+    if (milestone) {
+      milestoneId = milestone[1];
+    } else {
+      // Criar milestone se não existir
+      milestoneId = await createMilestone(task.milestone);
+      if (!milestoneId) {
+        console.error(`❌ Não foi possível criar a milestone "${task.milestone}".`);
+      }
+    }
+
+    // Criar a issue no GitHub
     const response = await octokit.rest.issues.create({
       owner: GITHUB_OWNER,
       repo: GITHUB_REPO,
       title: task.title,
       body: taskBody,
-      milestone: milestoneNumber,
       labels: labels,
-      state: task.status === "done" ? "closed" : "open",
+      milestone: milestoneId,
       assignees: [GITHUB_OWNER],
     });
 
-    console.log(`✅ Issue criada no GitHub: #${response.data.number}`);
-
-    // Se tiver um projeto definido, buscar projetos e adicionar a issue ao projeto
-    if (task.project) {
-      const projects = await fetchProjects();
-
-      // Tentar encontrar o projeto pela correspondência exata
-      const projectId = projects.get(task.project);
-
-      if (projectId) {
-        const added = await addIssueToProject(response.data.node_id, projectId);
-        if (added) {
-          console.log(`✅ Issue adicionada ao projeto "${task.project}"`);
-        }
-      }
+    if (!response.data.number) {
+      console.error(`❌ Erro ao criar issue: Resposta sem número de issue`);
+      return null;
     }
 
-    return response.data.number;
+    const issueNumber = response.data.number;
+    console.log(`✅ Issue #${issueNumber} criada com sucesso`);
+
+    // Adicionar a issue ao projeto
+    const projects = await fetchProjects();
+    const projectId = projects.get(task.project);
+
+    if (projectId) {
+      const added = await addIssueToProject(response.data.node_id, projectId);
+      if (added) {
+        console.log(`✅ Issue adicionada ao projeto "${task.project}"`);
+
+        // Novo: Atualizar o status no projeto
+        try {
+          console.log(`Tentando definir status da nova issue #${issueNumber} para "${task.status}" no projeto...`);
+
+          // Buscar opções de status do projeto
+          const statusOptions = await fetchProjectStatusOptions(projectId);
+
+          if (statusOptions && statusOptions.includes(task.status.toLowerCase())) {
+            console.log(`Status "${task.status}" encontrado nas opções do projeto, definindo...`);
+
+            // Chamar a função de atualização de status no projeto
+            const updated = await updateProjectItemStatus(response.data.node_id, projectId, task.status);
+
+            if (updated) {
+              console.log(`✅ Status definido no projeto para "${task.status}"`);
+            } else {
+              console.log(`⚠️ Falha ao definir status no projeto`);
+            }
+          } else {
+            console.log(`⚠️ Status "${task.status}" não encontrado nas opções do projeto`);
+          }
+        } catch (error) {
+          console.error(`❌ Erro ao tentar definir status no projeto:`, error);
+          // Continuar mesmo com erro no update do projeto
+        }
+      } else {
+        console.error(`❌ Erro ao adicionar issue ao projeto "${task.project}"`);
+      }
+    } else {
+      console.error(`❌ Projeto "${task.project}" não encontrado`);
+    }
+
+    return issueNumber;
   } catch (error) {
-    console.error("❌ Erro ao criar issue no GitHub:", error);
+    console.error(`❌ Erro ao criar issue: `, error);
     return null;
   }
 }
@@ -1787,13 +1836,6 @@ export async function updateTaskMilestone(issueNumber: number, newMilestone: str
  * @param statusValue Valor do status para atualizar
  * @returns boolean indicando se a operação foi bem-sucedida
  */
-/**
- * Atualiza o status de um item em um projeto do GitHub
- * @param issueNodeId ID do nó da issue no GitHub
- * @param projectId ID do projeto no GitHub
- * @param statusValue Valor do status para atualizar
- * @returns boolean indicando se a operação foi bem-sucedida
- */
 async function updateProjectItemStatus(issueNodeId: string, projectId: string, statusValue: string): Promise<boolean> {
   try {
     console.log(`\n🔄 Iniciando atualização de status no projeto...`);
@@ -1886,7 +1928,10 @@ async function updateProjectItemStatus(issueNodeId: string, projectId: string, s
 
       // Primeiro, tentar encontrar o campo exato "Status"
       for (const field of fields) {
-        if (field.dataType === "SINGLE_SELECT" && field.name === "Status") {
+        if (
+          field.dataType === "SINGLE_SELECT" &&
+          (field.name === "Status" || field.name === "Estado" || field.name === "State")
+        ) {
           statusField = field;
           statusFieldId = field.id;
           statusOptions = field.options || [];
@@ -1943,12 +1988,18 @@ async function updateProjectItemStatus(issueNodeId: string, projectId: string, s
           // Criar mapeamentos possíveis - versão aprimorada
           possibleStatusMappings[option.name.toLowerCase().trim()] = option.id;
 
+          // Mapeamentos exatos (case-insensitive)
+          // Nome exato sem alterações de case
+          possibleStatusMappings[option.name.trim()] = option.id;
+
           // Remover espaços extras e plurais
           const normalizedName = option.name.toLowerCase().trim().replace(/\s+/g, " ").replace(/s$/, "");
           possibleStatusMappings[normalizedName] = option.id;
 
-          // Tentar mapeamentos comuns
+          // Mapeamentos para "Todo"
           if (
+            option.name === "Todo" ||
+            option.name.toLowerCase() === "todo" ||
             normalizedName.includes("todo") ||
             normalizedName.includes("to do") ||
             normalizedName.includes("backlog") ||
@@ -1957,9 +2008,13 @@ async function updateProjectItemStatus(issueNodeId: string, projectId: string, s
             normalizedName === "pendente"
           ) {
             possibleStatusMappings["todo"] = option.id;
+            possibleStatusMappings["Todo"] = option.id;
           }
 
+          // Mapeamentos para "In Progress"
           if (
+            option.name === "In Progress" ||
+            option.name.toLowerCase() === "in progress" ||
             normalizedName.includes("progress") ||
             normalizedName.includes("andamento") ||
             normalizedName.includes("doing") ||
@@ -1967,10 +2022,14 @@ async function updateProjectItemStatus(issueNodeId: string, projectId: string, s
             normalizedName.includes("trabalhando")
           ) {
             possibleStatusMappings["in progress"] = option.id;
+            possibleStatusMappings["In Progress"] = option.id;
             possibleStatusMappings["doing"] = option.id;
           }
 
+          // Mapeamentos para "Done"
           if (
+            option.name === "Done" ||
+            option.name.toLowerCase() === "done" ||
             normalizedName.includes("done") ||
             normalizedName.includes("conclu") ||
             normalizedName.includes("finish") ||
@@ -1980,6 +2039,7 @@ async function updateProjectItemStatus(issueNodeId: string, projectId: string, s
             normalizedName.includes("finalizado")
           ) {
             possibleStatusMappings["done"] = option.id;
+            possibleStatusMappings["Done"] = option.id;
           }
         });
       } else {
@@ -1994,10 +2054,6 @@ async function updateProjectItemStatus(issueNodeId: string, projectId: string, s
     console.log(`\n🔍 Tentando corresponder status "${statusValue}" com as opções disponíveis...`);
 
     let targetStatusOptionId: string | null = null;
-    const statusValueLower = statusValue.toLowerCase().trim();
-
-    // Normalizar o statusValue (remover espaços extras e plural)
-    const normalizedStatusValue = statusValueLower.replace(/\s+/g, " ").replace(/s$/, "");
 
     // NOVO: Registrar todas as chaves de mapeamento possíveis
     console.log(`   Mapeamentos disponíveis:`);
@@ -2005,31 +2061,55 @@ async function updateProjectItemStatus(issueNodeId: string, projectId: string, s
       console.log(`     - "${key}" => "${possibleStatusMappings[key]}"`);
     });
 
-    // Método 1: Correspondência direta (case-insensitive)
+    // Método 1: Verificar correspondência direta primeiro (com nome exato, inclusive case)
     for (const option of statusOptions) {
-      if (option.name.toLowerCase().trim() === statusValueLower) {
+      if (option.name === statusValue) {
         targetStatusOptionId = option.id;
-        console.log(`✅ Correspondência direta encontrada: "${option.name}"`);
+        console.log(`✅ Correspondência exata encontrada (case sensitive): "${option.name}"`);
         break;
       }
     }
 
-    // Método 2: Usar mapeamentos
+    // Método 2: Verificar correspondência direta (case-insensitive)
     if (!targetStatusOptionId) {
-      // Tentar com a string original
-      if (possibleStatusMappings[statusValueLower]) {
-        targetStatusOptionId = possibleStatusMappings[statusValueLower];
-        console.log(`✅ Correspondência encontrada via mapeamento: "${statusValueLower}"`);
-      }
-      // Tentar com a string normalizada
-      else if (possibleStatusMappings[normalizedStatusValue]) {
-        targetStatusOptionId = possibleStatusMappings[normalizedStatusValue];
-        console.log(`✅ Correspondência encontrada via mapeamento normalizado: "${normalizedStatusValue}"`);
+      const statusValueLower = statusValue.toLowerCase().trim();
+      for (const option of statusOptions) {
+        if (option.name.toLowerCase().trim() === statusValueLower) {
+          targetStatusOptionId = option.id;
+          console.log(`✅ Correspondência direta encontrada (case insensitive): "${option.name}"`);
+          break;
+        }
       }
     }
 
-    // Método 3: Correspondência parcial
+    // Método 3: Verificar mapeamentos específicos do GitHub
     if (!targetStatusOptionId) {
+      // Primeiro tentar com o valor exato (preservando o case)
+      if (possibleStatusMappings[statusValue]) {
+        targetStatusOptionId = possibleStatusMappings[statusValue];
+        console.log(`✅ Correspondência encontrada via mapeamento exato: "${statusValue}"`);
+      }
+      // Caso especial para status conhecidos do GitHub
+      else if (statusValue.toLowerCase() === "todo" && possibleStatusMappings["Todo"]) {
+        targetStatusOptionId = possibleStatusMappings["Todo"];
+        console.log(`✅ Correspondência encontrada para "Todo"`);
+      } else if (statusValue.toLowerCase() === "in progress" && possibleStatusMappings["In Progress"]) {
+        targetStatusOptionId = possibleStatusMappings["In Progress"];
+        console.log(`✅ Correspondência encontrada para "In Progress"`);
+      } else if (statusValue.toLowerCase() === "done" && possibleStatusMappings["Done"]) {
+        targetStatusOptionId = possibleStatusMappings["Done"];
+        console.log(`✅ Correspondência encontrada para "Done"`);
+      }
+      // Tentar com a string lowercase
+      else if (possibleStatusMappings[statusValue.toLowerCase()]) {
+        targetStatusOptionId = possibleStatusMappings[statusValue.toLowerCase()];
+        console.log(`✅ Correspondência encontrada via mapeamento lowercase: "${statusValue.toLowerCase()}"`);
+      }
+    }
+
+    // Método 4: Correspondência parcial
+    if (!targetStatusOptionId) {
+      const statusValueLower = statusValue.toLowerCase().trim();
       for (const option of statusOptions) {
         const optionLower = option.name.toLowerCase().trim();
         if (optionLower.includes(statusValueLower) || statusValueLower.includes(optionLower)) {
@@ -2040,39 +2120,100 @@ async function updateProjectItemStatus(issueNodeId: string, projectId: string, s
       }
     }
 
-    // Método 4: Se for "todo" e nada foi encontrado, usar o primeiro status
-    if (!targetStatusOptionId && statusValueLower === "todo" && statusOptions.length > 0) {
-      targetStatusOptionId = statusOptions[0].id;
-      console.log(`⚠️ Usando o primeiro status disponível: "${statusOptions[0].name}" para "todo"`);
-    }
-
-    // Método 5: Se for "done" e nada foi encontrado, usar o último status
-    if (
-      !targetStatusOptionId &&
-      (statusValueLower === "done" || statusValueLower === "concluido" || statusValueLower === "concluído") &&
-      statusOptions.length > 0
-    ) {
-      targetStatusOptionId = statusOptions[statusOptions.length - 1].id;
-      console.log(
-        `⚠️ Usando o último status disponível: "${statusOptions[statusOptions.length - 1].name}" para "done"`
-      );
+    // Método 5: Mapeamentos específicos para valores típicos de status
+    if (!targetStatusOptionId) {
+      const statusValueLower = statusValue.toLowerCase().trim();
+      // Para status "todo"
+      if (statusValueLower === "todo" || statusValueLower === "to do" || statusValueLower === "backlog") {
+        // Buscar opção que parece ser um status inicial
+        for (const option of statusOptions) {
+          const optionLower = option.name.toLowerCase().trim();
+          if (
+            optionLower.includes("todo") ||
+            optionLower.includes("to do") ||
+            optionLower.includes("backlog") ||
+            optionLower === "new" ||
+            optionLower.includes("pendente") ||
+            optionLower.includes("fazer")
+          ) {
+            targetStatusOptionId = option.id;
+            console.log(`✅ Correspondência encontrada para status inicial: "${option.name}"`);
+            break;
+          }
+        }
+        // Se ainda não encontrou, usar o primeiro status
+        if (!targetStatusOptionId && statusOptions.length > 0) {
+          targetStatusOptionId = statusOptions[0].id;
+          console.log(`⚠️ Usando o primeiro status disponível: "${statusOptions[0].name}" para "${statusValue}"`);
+        }
+      }
+      // Para status "in progress"
+      else if (
+        statusValueLower === "in progress" ||
+        statusValueLower === "doing" ||
+        statusValueLower.includes("andamento")
+      ) {
+        // Buscar opção que parece ser um status de progresso
+        for (const option of statusOptions) {
+          const optionLower = option.name.toLowerCase().trim();
+          if (
+            optionLower.includes("progress") ||
+            optionLower.includes("doing") ||
+            optionLower.includes("andamento") ||
+            optionLower.includes("execução") ||
+            optionLower.includes("trabalhando")
+          ) {
+            targetStatusOptionId = option.id;
+            console.log(`✅ Correspondência encontrada para status em andamento: "${option.name}"`);
+            break;
+          }
+        }
+        // Se ainda não encontrou e há pelo menos dois status, usar o segundo
+        if (!targetStatusOptionId && statusOptions.length > 1) {
+          targetStatusOptionId = statusOptions[1].id;
+          console.log(`⚠️ Usando o segundo status disponível: "${statusOptions[1].name}" para "${statusValue}"`);
+        }
+      }
+      // Para status "done"
+      else if (statusValueLower === "done" || statusValueLower === "finished" || statusValueLower.includes("conclu")) {
+        // Buscar opção que parece ser um status de conclusão
+        for (const option of statusOptions) {
+          const optionLower = option.name.toLowerCase().trim();
+          if (
+            optionLower.includes("done") ||
+            optionLower.includes("finish") ||
+            optionLower.includes("complet") ||
+            optionLower.includes("conclu") ||
+            optionLower.includes("pronto") ||
+            optionLower.includes("feito")
+          ) {
+            targetStatusOptionId = option.id;
+            console.log(`✅ Correspondência encontrada para status concluído: "${option.name}"`);
+            break;
+          }
+        }
+        // Se ainda não encontrou e há pelo menos três status, usar o último
+        if (!targetStatusOptionId && statusOptions.length > 2) {
+          targetStatusOptionId = statusOptions[statusOptions.length - 1].id;
+          console.log(
+            `⚠️ Usando o último status disponível: "${
+              statusOptions[statusOptions.length - 1].name
+            }" para "${statusValue}"`
+          );
+        }
+      }
     }
 
     if (!targetStatusOptionId) {
-      console.log(`❌ Não foi possível encontrar um status correspondente a "${statusValue}"`);
+      console.log(`❌ Não foi possível encontrar uma correspondência para o status "${statusValue}"`);
       return false;
     }
 
-    console.log(`✅ Usando opção de status com ID: ${targetStatusOptionId}`);
-
-    // ETAPA 4: Buscar o item do projeto correspondente à issue
+    // ETAPA 4: Encontrar o item do projeto associado à issue
     let projectItemId: string | null = null;
 
     try {
-      console.log(`\n🔍 Buscando item do projeto que corresponde à issue...`);
-
-      // Buscar os itens do projeto
-      const itemsQuery = `
+      const findItemQuery = `
         query {
           node(id: "${projectV2Id}") {
             ... on ProjectV2 {
@@ -2082,8 +2223,6 @@ async function updateProjectItemStatus(issueNodeId: string, projectId: string, s
                   content {
                     ... on Issue {
                       id
-                      number
-                      title
                     }
                   }
                 }
@@ -2093,67 +2232,28 @@ async function updateProjectItemStatus(issueNodeId: string, projectId: string, s
         }
       `;
 
-      const itemsData = await octokit.graphql<any>(itemsQuery);
+      const itemsData = await octokit.graphql<any>(findItemQuery);
       const items = itemsData.node?.items?.nodes || [];
 
-      console.log(`📋 Itens encontrados no projeto: ${items.length}`);
+      console.log(`\n🔍 Procurando item do projeto associado à issue (encontrados ${items.length} itens)`);
 
-      // Primeiro buscar informações da issue para ter certeza do número correto
-      let issueNumber: number | null = null;
-      try {
-        const issueQuery = `
-          query {
-            node(id: "${issueNodeId}") {
-              ... on Issue {
-                id
-                number
-                title
-              }
-            }
-          }
-        `;
-
-        const issueInfo = await octokit.graphql<any>(issueQuery);
-        if (issueInfo.node && issueInfo.node.number) {
-          issueNumber = issueInfo.node.number;
-          console.log(`✅ Issue encontrada: #${issueNumber} - "${issueInfo.node.title}"`);
-        }
-      } catch (error) {
-        console.log(`⚠️ Não foi possível obter informações detalhadas da issue: ${error}`);
-        // Continuar mesmo sem as informações da issue
-      }
-
-      // Primeiro: verificar correspondência por id da issue
       for (const item of items) {
-        if (item.content && item.content.id === issueNodeId) {
+        if (item.content?.id === issueNodeId) {
           projectItemId = item.id;
-          console.log(`✅ Item encontrado com correspondência exata de ID: ${item.id}`);
-          console.log(`   Title: "${item.content.title}"`);
+          console.log(`✅ Item encontrado: ${projectItemId}`);
           break;
         }
       }
 
-      // Segundo: verificar correspondência por número da issue
-      if (!projectItemId && issueNumber) {
-        for (const item of items) {
-          if (item.content && item.content.number === issueNumber) {
-            projectItemId = item.id;
-            console.log(`✅ Item encontrado com correspondência por número (#${issueNumber}): ${item.id}`);
-            console.log(`   Title: "${item.content.title}"`);
-            break;
-          }
-        }
-      }
-
-      // Se ainda não encontrou, tentar adicionar a issue ao projeto
+      // Se não encontrou o item, tentar adicionar a issue ao projeto
       if (!projectItemId) {
-        console.log(`⚠️ Item não encontrado. Tentando adicionar a issue ao projeto...`);
+        console.log(`⚠️ Item não encontrado, tentando adicionar issue ao projeto...`);
 
         try {
-          const addMutation = `
+          const addItemMutation = `
             mutation {
               addProjectV2ItemById(input: {
-                projectId: "${projectV2Id}",
+                projectId: "${projectV2Id}"
                 contentId: "${issueNodeId}"
               }) {
                 item {
@@ -2163,99 +2263,37 @@ async function updateProjectItemStatus(issueNodeId: string, projectId: string, s
             }
           `;
 
-          const addResponse = await octokit.graphql<any>(addMutation);
-          if (addResponse.addProjectV2ItemById?.item?.id) {
-            projectItemId = addResponse.addProjectV2ItemById.item.id;
-            console.log(`✅ Issue adicionada ao projeto. ID do item: ${projectItemId}`);
+          const addResult = await octokit.graphql<any>(addItemMutation);
+          if (addResult.addProjectV2ItemById?.item?.id) {
+            projectItemId = addResult.addProjectV2ItemById.item.id;
+            console.log(`✅ Issue adicionada ao projeto: ${projectItemId}`);
+          } else {
+            console.log(`❌ Falha ao adicionar issue ao projeto`);
+            return false;
           }
         } catch (error: any) {
-          if (error.message && error.message.includes("already exists")) {
-            console.log(`⚠️ A issue já existe no projeto. Buscando novamente com as informações corretas...`);
-
-            // Tentar uma segunda abordagem para encontrar o item
-            try {
-              // Buscar projetos da issue diretamente
-              const issueProjectsQuery = `
-                query {
-                  node(id: "${issueNodeId}") {
-                    ... on Issue {
-                      projectItems(first: 20) {
-                        nodes {
-                          id
-                          project {
-                            id
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              `;
-
-              const issueProjectsData = await octokit.graphql<any>(issueProjectsQuery);
-              const projectItems = issueProjectsData.node?.projectItems?.nodes || [];
-
-              // Procurar o item que corresponde ao projeto atual
-              for (const item of projectItems) {
-                if (item.project && (item.project.id === projectV2Id || item.project.id === projectId)) {
-                  projectItemId = item.id;
-                  console.log(`✅ Item encontrado via query de projetos da issue: ${item.id}`);
-                  break;
-                }
-              }
-            } catch (error: any) {
-              console.log(`⚠️ Erro ao buscar projetos da issue: ${error.message}`);
-            }
-
-            // Se ainda não encontrou, tentar buscar os itens novamente
-            if (!projectItemId) {
-              const refreshItemsData = await octokit.graphql<any>(itemsQuery);
-              const refreshedItems = refreshItemsData.node?.items?.nodes || [];
-
-              for (const item of refreshedItems) {
-                if (issueNumber && item.content && item.content.number === issueNumber) {
-                  projectItemId = item.id;
-                  console.log(`✅ Item encontrado após nova busca (correspondência por número): ${item.id}`);
-                  break;
-                }
-
-                if (item.content && item.content.id === issueNodeId) {
-                  projectItemId = item.id;
-                  console.log(`✅ Item encontrado após nova busca (correspondência por ID): ${item.id}`);
-                  break;
-                }
-              }
-            }
-          } else {
-            console.error(`❌ Erro ao adicionar issue ao projeto:`, error.message);
-          }
+          console.error(`❌ Erro ao adicionar issue ao projeto:`, error.message);
+          // Continuar mesmo com erro, pois a issue pode já existir no projeto
         }
       }
     } catch (error: any) {
-      console.error(`❌ Erro ao buscar item do projeto:`, error.message);
+      console.error(`❌ Erro ao buscar itens do projeto:`, error.message);
       return false;
     }
 
-    if (!projectItemId) {
-      console.log(`❌ Não foi possível encontrar ou adicionar o item ao projeto`);
+    // ETAPA 5: Atualizar o status do item
+    if (!projectItemId || !statusFieldId || !targetStatusOptionId) {
+      console.log(`❌ Informações insuficientes para atualizar o status`);
       return false;
     }
 
-    // ETAPA 5: Executar a mutação para atualizar o status
     try {
-      console.log(`\n🔄 Executando atualização de status...`);
-      console.log(`   Projeto: ${projectV2Id}`);
-      console.log(`   Item: ${projectItemId}`);
-      console.log(`   Campo de status: ${statusFieldId}`);
-      console.log(`   Valor de status: ${targetStatusOptionId}`);
-
-      // VERSÃO CORRIGIDA DA MUTAÇÃO
       const updateMutation = `
         mutation {
           updateProjectV2ItemFieldValue(input: {
-            projectId: "${projectV2Id}",
-            itemId: "${projectItemId}",
-            fieldId: "${statusFieldId}",
+            projectId: "${projectV2Id}"
+            itemId: "${projectItemId}"
+            fieldId: "${statusFieldId}"
             value: { 
               singleSelectOptionId: "${targetStatusOptionId}"
             }
@@ -2267,115 +2305,30 @@ async function updateProjectItemStatus(issueNodeId: string, projectId: string, s
         }
       `;
 
-      const updateResponse = await octokit.graphql<any>(updateMutation);
-
-      if (updateResponse.updateProjectV2ItemFieldValue?.projectV2Item?.id) {
-        console.log(`\n✅ ✅ ✅ Status atualizado com sucesso para "${statusValue}"!`);
-
-        // Verificar se a atualização realmente foi aplicada
-        console.log(`\n🔍 Verificando status atual após a atualização...`);
-
-        try {
-          // Esperar um curto período para que a API atualize os dados
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-
-          const verifyQuery = `
-            query {
-              node(id: "${projectV2Id}") {
-                ... on ProjectV2 {
-                  items(first: 100) {
-                    nodes {
-                      id
-                      content {
-                        ... on Issue {
-                          id
-                          number
-                        }
-                      }
-                      fieldValues(first: 20) {
-                        nodes {
-                          ... on ProjectV2ItemFieldSingleSelectValue {
-                            name
-                            field {
-                              ... on ProjectV2SingleSelectField {
-                                name
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          `;
-
-          const verifyData = await octokit.graphql<any>(verifyQuery);
-          const items = verifyData.node?.items?.nodes || [];
-
-          let statusVerified = false;
-
-          for (const item of items) {
-            if (item.id === projectItemId) {
-              const fieldValues = item.fieldValues?.nodes || [];
-
-              console.log(`   Valores de campo para o item:`);
-              for (const fieldValue of fieldValues) {
-                if (fieldValue.field?.name && fieldValue.name) {
-                  console.log(`   - ${fieldValue.field.name}: ${fieldValue.name}`);
-
-                  if (fieldValue.field.name.toLowerCase().includes("status")) {
-                    console.log(`   ✅ Status atual no projeto: "${fieldValue.name}"`);
-                    statusVerified = true;
-                  }
-                }
-              }
-
-              break;
-            }
-          }
-
-          if (!statusVerified) {
-            console.log(`   ⚠️ Não foi possível verificar o status atual, mas a mutação foi aceita pela API.`);
-          }
-        } catch (error: any) {
-          console.log(`   ⚠️ Não foi possível verificar o status atual: ${error.message}`);
-        }
-
+      const updateResult = await octokit.graphql<any>(updateMutation);
+      if (updateResult.updateProjectV2ItemFieldValue?.projectV2Item?.id) {
+        console.log(`\n✅ Status atualizado com sucesso!`);
         return true;
       } else {
-        console.log(`❌ A resposta da API não retornou o item atualizado`);
+        console.log(`\n❌ Falha ao atualizar o status, resposta invalida da API`);
         return false;
       }
     } catch (error: any) {
-      console.error(`❌ Erro ao atualizar o status do item:`, error.message);
+      console.error(`\n❌ Erro ao atualizar o status:`, error.message);
 
-      // Detalhamento do erro para facilitar o debugging
-      if (error.errors) {
+      // Verificar se o erro contém detalhes adicionais
+      if (error.errors && error.errors.length > 0) {
         error.errors.forEach((err: any, index: number) => {
           console.error(`   Erro ${index + 1}: ${err.message}`);
           if (err.type) console.error(`   Tipo: ${err.type}`);
-          if (err.path) console.error(`   Caminho: ${err.path}`);
+          if (err.path) console.error(`   Caminho: ${err.path.join(".")}`);
         });
-      }
-
-      // FALLBACK: Tentar abordagem alternativa se o erro for específico
-      if (
-        error.message &&
-        (error.message.includes("User does not have permission") ||
-          error.message.includes("not accessible by") ||
-          error.message.includes("Resource not accessible"))
-      ) {
-        console.log(`\n⚠️ Erro de permissão. Verifique se o token tem os escopos corretos:`);
-        console.log(`   1. Use 'Personal access tokens (classic)' e não 'Fine-grained tokens'`);
-        console.log(`   2. Garanta que o token tenha os escopos: 'repo' e 'project'`);
       }
 
       return false;
     }
   } catch (error: any) {
-    console.error(`❌ Erro geral na função updateProjectItemStatus:`, error.message);
+    console.error(`\n❌ Erro não tratado durante atualização de status:`, error.message);
     return false;
   }
 }
