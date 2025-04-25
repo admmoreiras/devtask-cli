@@ -1,7 +1,7 @@
 import inquirer from "inquirer";
 import path from "path";
 import github from "../utils/github/index.js";
-import { saveJson } from "../utils/storage.js";
+import { getNextSequentialId, saveJson } from "../utils/storage.js";
 
 export async function createTask() {
   // Buscar milestones e projetos existentes para verificação
@@ -127,7 +127,10 @@ export async function createTask() {
     .toLowerCase()
     .replace(/\s+/g, "-")
     .replace(/[^\w-]/g, "");
-  const id = Date.now();
+
+  // Usar ID sequencial em vez de timestamp
+  const id = await getNextSequentialId();
+
   const task = {
     id,
     title,
@@ -140,5 +143,5 @@ export async function createTask() {
 
   await saveJson(path.join(".task/issues", `${id}-${slug}.json`), task);
 
-  console.log("✅ Task criada!");
+  console.log(`✅ Task criada com ID #${id}!`);
 }

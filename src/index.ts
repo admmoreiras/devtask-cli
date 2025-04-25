@@ -18,7 +18,11 @@ const program = new Command();
 program.name("devtask").description("CLI de gestão de tarefas local com IA").version("0.1.0");
 
 program.command("create").description("Criar nova task").action(createTask);
-program.command("list").description("Listar todas as tasks").action(listTasks);
+program
+  .command("list")
+  .description("Listar todas as tasks")
+  .option("-c, --compact", "Exibir em modo compacto")
+  .action((options) => listTasks(options));
 program.command("sync").description("Sincronizar tasks com GitHub").action(syncTasks);
 program.command("info").description("Mostrar informações do GitHub (milestones e projetos)").action(showGitHubInfo);
 program.command("init").description("Criar ou editar template para geração de tasks").action(initTemplate);

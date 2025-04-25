@@ -78,8 +78,21 @@ Exibe uma tabela formatada com:
 - Número de issue do GitHub (com prefixo #)
 - Título da task
 - Status
+- Prioridade (alta, média, baixa)
+- Dependências (IDs de tarefas que precisam ser concluídas antes)
 - Projeto
 - Milestone/Sprint
+
+Opções disponíveis:
+
+```bash
+# Exibir em modo compacto para melhor visualização em telas pequenas
+devtask list --compact
+# ou
+devtask list -c
+```
+
+O modo compacto mostra as informações essenciais em formato mais condensado, ideal para trabalhar em terminais menores ou com muitas tarefas.
 
 ### Sincronizar com GitHub
 
@@ -154,8 +167,16 @@ Gera tarefas automaticamente com base nas instruções do template selecionado u
 
 - Análise de instruções de projeto detalhadas
 - Geração inteligente de tarefas organizadas
+- Classificação automática de prioridades (alta, média, baixa) baseada na complexidade
+- Identificação de dependências entre tarefas para gerenciar a ordem de desenvolvimento
 - Pré-visualização antes de salvar
 - Integração com o sistema existente de tarefas
+
+A ferramenta identifica automaticamente:
+
+- Quais tarefas são mais críticas (prioridade alta)
+- Quais tarefas dependem da conclusão de outras
+- Organização ideal em sprints/milestones
 
 ### Chat interativo com IA e File Agent
 
@@ -319,12 +340,16 @@ Tasks são armazenadas localmente no diretório `.task/issues` em formato JSON c
   "milestone": "Sprint 1",
   "project": "Frontend",
   "status": "todo",
+  "priority": "alta",
+  "dependencies": [1686868574310, 1686868574311],
   "synced": true,
   "github_issue_number": 42,
   "lastSyncAt": "2023-07-01T12:00:00Z",
   "state": "open"
 }
 ```
+
+A estrutura de dependências permite gerenciar o fluxo de trabalho, garantindo que tarefas dependentes só sejam iniciadas após a conclusão das tarefas necessárias. A prioridade ajuda a identificar quais tarefas devem ser priorizadas com base na complexidade e importância para o projeto.
 
 Os arquivos de tarefas são nomeados seguindo o padrão:
 

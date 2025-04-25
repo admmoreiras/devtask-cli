@@ -2,7 +2,7 @@ import fs from "fs-extra";
 import inquirer from "inquirer";
 import path from "path";
 import { generateTasksFromInstructions, readTemplate, TaskTemplate } from "../utils/openai.js";
-import { saveJson } from "../utils/storage.js";
+import { getNextSequentialId, saveJson } from "../utils/storage.js";
 
 export async function generateTasks() {
   // Verificar templates disponíveis
@@ -118,11 +118,18 @@ async function saveTasks(tasks: TaskTemplate[]) {
   // Primeiro, criar um mapeamento de índices para IDs reais
   const indexToIdMap = new Map<number, number>();
 
-  // Gerar IDs para todas as tarefas
+  // Gerar IDs sequenciais para todas as tarefas - UM POR UM em vez de em paralelo
+  // para garantir que cada ID seja único e incremental
+  const taskIds: number[] = [];
+  for (let i = 0; i < tasks.length; i++) {
+    // Obter ID sequencial - aguarda cada ID antes de obter o próximo
+    const id = await getNextSequentialId();
+    taskIds.push(id);
+    indexToIdMap.set(i + 1, id); // Mapear índice (começando em 1) para o ID sequencial
+  }
+
   const tasksWithIds = tasks.map((task, index) => {
-    const id = Date.now() + Math.floor(Math.random() * 1000) + index; // Garante IDs únicos mesmo se criados ao mesmo tempo
-    indexToIdMap.set(index + 1, id); // Mapear índice (começando em 1) para o ID real
-    return { ...task, id };
+    return { ...task, id: taskIds[index] };
   });
 
   const savePromises = tasksWithIds.map(async (task, index) => {
@@ -150,7 +157,9 @@ async function saveTasks(tasks: TaskTemplate[]) {
 
     const filePath = path.join(issuesDir, `${task.id}-${slug}.json`);
     console.log(
-      `Tarefa ${index + 1}: Salvando em ${filePath} com projeto: ${taskData.project}, prioridade: ${taskData.priority}`
+      `Tarefa ${index + 1}: Salvando com ID #${task.id} (${filePath}), projeto: ${taskData.project}, prioridade: ${
+        taskData.priority
+      }`
     );
 
     await saveJson(filePath, taskData);

@@ -17,7 +17,12 @@ interface GitHubIssue {
   state: string;
 }
 
-export const listTasks = async (options = { offline: false }): Promise<void> => {
+interface ListOptions {
+  offline?: boolean;
+  compact?: boolean;
+}
+
+export const listTasks = async (options: ListOptions = { offline: false, compact: false }): Promise<void> => {
   try {
     const tasksDir = path.join(process.cwd(), ".task", "issues");
 
@@ -55,18 +60,44 @@ export const listTasks = async (options = { offline: false }): Promise<void> => 
     console.log(chalk.blue("\n📄 Exibindo informações armazenadas localmente."));
     console.log(chalk.gray("Para sincronizar com o GitHub, use: devtask sync"));
 
+    // Verificar tamanho do terminal para ajustar automaticamente (versão compacta em terminais pequenos)
+    const isCompactMode = options.compact || process.stdout.columns < 120;
+
+    // Configuração da tabela baseada no modo (compacto ou normal)
+    const tableConfig = isCompactMode
+      ? {
+          head: [
+            chalk.cyan("ID"),
+            chalk.cyan("Título"),
+            chalk.cyan("Status"),
+            chalk.cyan("Prior"),
+            chalk.cyan("Dep"),
+            chalk.cyan("Sync"),
+          ],
+          colWidths: [8, 40, 10, 6, 12, 5],
+          truncate: "…",
+          style: { "padding-left": 1, "padding-right": 1 },
+        }
+      : {
+          head: [
+            chalk.cyan("ID"),
+            chalk.cyan("Título"),
+            chalk.cyan("Status"),
+            chalk.cyan("GitHub"),
+            chalk.cyan("Prior"),
+            chalk.cyan("Depend"),
+            chalk.cyan("Projeto"),
+            chalk.cyan("Sprint"),
+            chalk.cyan("Sync"),
+          ],
+          colWidths: [8, 35, 12, 8, 7, 12, 10, 16, 5],
+          truncate: "…",
+          style: { "padding-left": 1, "padding-right": 1 },
+        };
+
     // Preparar tabela para exibição
     const table = new Table({
-      head: [
-        chalk.cyan("Título"),
-        chalk.cyan("Status"),
-        chalk.cyan("Status GitHub"),
-        chalk.cyan("Prioridade"),
-        chalk.cyan("Dependências"),
-        chalk.cyan("Projeto"),
-        chalk.cyan("Sprint"),
-        chalk.cyan("Sincronizado"),
-      ],
+      ...tableConfig,
       wordWrap: true,
       wrapOnWordBoundary: true,
     });
@@ -82,29 +113,35 @@ export const listTasks = async (options = { offline: false }): Promise<void> => 
       // Usar github_issue_number
       const issueNumber = task.github_issue_number;
 
-      // Criar link para issue no GitHub, se tiver número
-      let issueTitle = task.title;
-      let issuePrefix = "";
+      // Limitar o tamanho do título para caber na coluna
+      const titleMaxLength = isCompactMode ? 43 : 36;
+      const shortenedTitle =
+        task.title.length > titleMaxLength ? task.title.substring(0, titleMaxLength - 1) + "…" : task.title;
 
+      // Adicionar link se necessário
+      let issueTitle = shortenedTitle;
       if (issueNumber) {
-        // Construir URL para a issue no GitHub
         const githubUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/issues/${issueNumber}`;
-        // Criar texto com link utilizando formatação de terminal hyperlink
-        issuePrefix = `#${issueNumber} - `;
-        // O formato \u001b]8;;URL\u0007TEXT\u001b]8;;\u0007 cria um hyperlink no terminal
-        issueTitle = `\u001b]8;;${githubUrl}\u0007${task.title}\u001b]8;;\u0007`;
+        issueTitle = `\u001b]8;;${githubUrl}\u0007${shortenedTitle}\u001b]8;;\u0007`;
       }
 
       // Remover '@' do nome do projeto se existir e garantir N/A se vazio
       const projectName = task.project ? (task.project.startsWith("@") ? task.project.substring(1) : task.project) : "";
 
+      // Abreviar projeto se necessário
+      const shortenedProject = projectName.length > 8 ? projectName.substring(0, 7) + "…" : projectName;
+
+      // Abreviar milestone/sprint
+      const shortenedMilestone =
+        task.milestone && task.milestone.length > 14 ? task.milestone.substring(0, 13) + "…" : task.milestone || "N/A";
+
       // Determinar o status do GitHub
       let githubStatus = "N/A";
       if (task.state) {
         if (task.state === "deleted") {
-          githubStatus = chalk.red("Excluída");
+          githubStatus = chalk.red("Del");
         } else {
-          githubStatus = task.state === "open" ? "Aberta" : "Fechada";
+          githubStatus = task.state === "open" ? "Open" : "Closed";
         }
       }
 
@@ -135,27 +172,37 @@ export const listTasks = async (options = { offline: false }): Promise<void> => 
       const syncSymbol = `${syncStatus}${modifiedSymbol}`;
 
       // Destacar título em cinza para issues excluídas no GitHub
-      const titleDisplay =
-        task.state === "deleted"
-          ? chalk.gray(`${issuePrefix}${issueTitle}`)
-          : chalk.green(`${issuePrefix}${issueTitle}`);
+      const titleDisplay = task.state === "deleted" ? chalk.gray(issueTitle) : chalk.green(issueTitle);
 
       // Formatar dependências
-      const dependenciesDisplay = formatDependencies(task.dependencies || [], tasksById);
+      const dependenciesDisplay = formatDependencies(task.dependencies || [], tasksById, isCompactMode);
 
       // Formatar prioridade com cores
-      const priorityDisplay = getPriorityWithColor(task.priority || "");
+      const priorityDisplay = getPriorityWithColor(task.priority || "", isCompactMode);
 
-      table.push([
-        titleDisplay,
-        getColoredStatus(task.status),
-        githubStatus,
-        priorityDisplay,
-        dependenciesDisplay,
-        projectName || "N/A",
-        task.milestone || "N/A",
-        syncSymbol,
-      ]);
+      // Adicionar linha à tabela com base no modo
+      if (isCompactMode) {
+        table.push([
+          task.id,
+          titleDisplay,
+          getColoredStatus(task.status, true),
+          priorityDisplay,
+          dependenciesDisplay,
+          syncSymbol,
+        ]);
+      } else {
+        table.push([
+          task.id,
+          titleDisplay,
+          getColoredStatus(task.status),
+          githubStatus,
+          priorityDisplay,
+          dependenciesDisplay,
+          shortenedProject || "N/A",
+          shortenedMilestone,
+          syncSymbol,
+        ]);
+      }
     });
 
     console.log(chalk.bold("\nLista de Tarefas:"));
@@ -166,65 +213,113 @@ export const listTasks = async (options = { offline: false }): Promise<void> => 
     console.log(`${chalk.green("✓")} - Sincronizado com GitHub`);
     console.log(`${chalk.red("✗")} - Não sincronizado`);
     console.log(`${chalk.yellow("!")} - Modificado localmente desde a última sincronização`);
-    console.log(`${chalk.red("Excluída")} - Issue removida do GitHub mas mantida localmente`);
-    console.log(chalk.blue("Os títulos das tarefas são clicáveis e abrem diretamente no GitHub"));
+    if (!isCompactMode) {
+      console.log(`${chalk.red("Del")} - Issue removida do GitHub mas mantida localmente`);
+      console.log(chalk.blue("Os títulos das tarefas são clicáveis e abrem diretamente no GitHub"));
+    }
   } catch (error) {
     console.error(chalk.red("Erro ao listar tarefas:"), error);
   }
 };
 
 // Função para colorir o status
-const getColoredStatus = (status: string): string => {
+const getColoredStatus = (status: string, isCompact: boolean = false): string => {
+  let displayStatus = status;
+
+  // Versão abreviada para modo compacto
+  if (isCompact) {
+    switch (status.toLowerCase()) {
+      case "todo":
+        displayStatus = "TODO";
+        break;
+      case "in progress":
+        displayStatus = "PROG";
+        break;
+      case "em andamento":
+        displayStatus = "PROG";
+        break;
+      case "done":
+        displayStatus = "DONE";
+        break;
+      case "concluído":
+      case "concluido":
+        displayStatus = "DONE";
+        break;
+      case "blocked":
+      case "bloqueado":
+        displayStatus = "BLOCK";
+        break;
+    }
+  }
+
   switch (status.toLowerCase()) {
     case "todo":
-      return chalk.blue(status);
+      return chalk.blue(displayStatus);
     case "in progress":
     case "em andamento":
-      return chalk.yellow(status);
+      return chalk.yellow(displayStatus);
     case "done":
     case "concluído":
     case "concluido":
-      return chalk.green(status);
+      return chalk.green(displayStatus);
     case "blocked":
     case "bloqueado":
-      return chalk.red(status);
+      return chalk.red(displayStatus);
     default:
-      return status;
+      return displayStatus;
   }
 };
 
 // Função para colorir a prioridade
-const getPriorityWithColor = (priority: string): string => {
+const getPriorityWithColor = (priority: string, isCompact: boolean = false): string => {
+  let displayPriority = priority;
+
+  // Versão abreviada para modo compacto
+  if (isCompact) {
+    switch (priority.toLowerCase()) {
+      case "alta":
+        displayPriority = "ALT";
+        break;
+      case "média":
+      case "media":
+        displayPriority = "MED";
+        break;
+      case "baixa":
+        displayPriority = "BAX";
+        break;
+      default:
+        displayPriority = priority || "N/A";
+    }
+  }
+
   switch (priority.toLowerCase()) {
     case "alta":
-      return chalk.red(priority);
+      return chalk.red(displayPriority);
     case "média":
     case "media":
-      return chalk.yellow(priority);
+      return chalk.yellow(displayPriority);
     case "baixa":
-      return chalk.green(priority);
+      return chalk.green(displayPriority);
     default:
-      return priority || "N/A";
+      return displayPriority || "N/A";
   }
 };
 
 // Função para formatar as dependências
-const formatDependencies = (dependencies: number[], tasksById: Map<number, Task>): string => {
+const formatDependencies = (
+  dependencies: number[],
+  tasksById: Map<number, Task>,
+  isCompact: boolean = false
+): string => {
   if (!dependencies || dependencies.length === 0) {
     return "N/A";
   }
 
+  // Mostrar todas as dependências como números, sem ícones
   return dependencies
     .map((depId) => {
-      const depTask = tasksById.get(depId);
-      if (!depTask) return `#${depId}`;
-
-      // Verificar o status da dependência
-      const isCompleted = ["done", "concluído", "concluido"].includes(depTask.status.toLowerCase());
-      const symbol = isCompleted ? "✓" : "⏳";
-      const color = isCompleted ? chalk.green : chalk.yellow;
-
-      return color(`${symbol} #${depId}`);
+      // Usar apenas o ID sem ícones
+      return `${depId}`;
     })
     .join(", ");
 };
