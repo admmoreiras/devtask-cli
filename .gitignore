@@ -12,3 +12,9 @@ dist/
 
 # Logs
 *.log 
+
+# Cursor
+.cursor/
+
+# Memory Bank
+memory-bank/

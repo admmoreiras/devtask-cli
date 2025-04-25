@@ -12,6 +12,8 @@ export interface TaskTemplate {
   milestone: string;
   project: string;
   status: string;
+  priority: string; // Prioridade da tarefa
+  dependencies: number[]; // IDs das tarefas que esta tarefa depende
 }
 
 // Interface para a estrutura do template com instruções
@@ -80,15 +82,58 @@ export async function generateTasksFromInstructions(template: Template): Promise
 
   try {
     const promptContent = template.project
-      ? `Com base nas seguintes instruções de projeto, crie uma lista estruturada de tarefas. Cada tarefa deve ter um título claro, descrição detalhada, e ser associada ao projeto "${template.project}" e milestone/sprint apropriados:\n\n${template.instructions}\n\nRetorne a resposta como um array JSON com objetos no seguinte formato: { "title": "string", "description": "string", "project": "${template.project}", "milestone": "string", "status": "todo" }`
-      : `Com base nas seguintes instruções de projeto, crie uma lista estruturada de tarefas. Cada tarefa deve ter um título claro, descrição detalhada, e ser associada a um projeto/componente e milestone/sprint apropriados:\n\n${template.instructions}\n\nRetorne a resposta como um array JSON com objetos no seguinte formato: { "title": "string", "description": "string", "project": "string", "milestone": "string", "status": "todo" }`;
+      ? `Com base nas seguintes instruções de projeto, crie uma lista estruturada de tarefas. Cada tarefa deve ter um título claro, descrição detalhada, e ser associada ao projeto "${template.project}" e milestone/sprint apropriados.
+
+Avalie e atribua uma prioridade para cada tarefa com base na complexidade do desenvolvimento:
+- "alta": para tarefas complexas e cruciais para o funcionamento do sistema
+- "média": para tarefas de complexidade moderada
+- "baixa": para tarefas simples e de menor impacto
+
+Identifique dependências entre as tarefas. Uma tarefa depende de outra quando só pode ser iniciada após a conclusão da tarefa dependente. Liste as dependências pelo número de índice da tarefa (começando em 1, sendo a primeira tarefa o índice 1).
+
+Instruções:
+${template.instructions}
+
+Retorne a resposta como um array JSON com objetos no seguinte formato: 
+{ 
+  "title": "string", 
+  "description": "string", 
+  "project": "${template.project}", 
+  "milestone": "string", 
+  "status": "todo",
+  "priority": "alta|média|baixa",
+  "dependencies": [] // array de números de índice (1, 2, 3, etc.) de outras tarefas que esta tarefa depende
+}`
+      : `Com base nas seguintes instruções de projeto, crie uma lista estruturada de tarefas. Cada tarefa deve ter um título claro, descrição detalhada, e ser associada a um projeto/componente e milestone/sprint apropriados.
+
+Avalie e atribua uma prioridade para cada tarefa com base na complexidade do desenvolvimento:
+- "alta": para tarefas complexas e cruciais para o funcionamento do sistema
+- "média": para tarefas de complexidade moderada 
+- "baixa": para tarefas simples e de menor impacto
+
+Identifique dependências entre as tarefas. Uma tarefa depende de outra quando só pode ser iniciada após a conclusão da tarefa dependente. Liste as dependências pelo número de índice da tarefa (começando em 1, sendo a primeira tarefa o índice 1).
+
+Instruções:
+${template.instructions}
+
+Retorne a resposta como um array JSON com objetos no seguinte formato: 
+{ 
+  "title": "string", 
+  "description": "string", 
+  "project": "string", 
+  "milestone": "string", 
+  "status": "todo",
+  "priority": "alta|média|baixa",
+  "dependencies": [] // array de números de índice (1, 2, 3, etc.) de outras tarefas que esta tarefa depende
+}`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4.1",
       messages: [
         {
           role: "system",
-          content: "Você é um assistente especializado em quebrar projetos em tarefas menores e bem definidas.",
+          content:
+            "Você é um assistente especializado em quebrar projetos em tarefas menores e bem definidas, identificando prioridades e dependências entre elas.",
         },
         {
           role: "user",

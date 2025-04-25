@@ -7,3 +7,5 @@ tsconfig.json
 node_modules/
 dist/**/*.map
 .task/
+.cursor/
+memory-bank/

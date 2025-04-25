@@ -5,6 +5,8 @@ export interface Task {
   milestone: string;
   project: string;
   status: string;
+  priority?: string; // Prioridade da tarefa: alta, média, baixa, etc.
+  dependencies?: number[]; // IDs das tarefas que precisam ser concluídas antes
   synced?: boolean;
   github_issue_number?: number;
   lastSyncAt?: string; // Data e hora da última sincronização com GitHub

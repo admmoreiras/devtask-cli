@@ -61,6 +61,8 @@ export const listTasks = async (options = { offline: false }): Promise<void> => 
         chalk.cyan("Título"),
         chalk.cyan("Status"),
         chalk.cyan("Status GitHub"),
+        chalk.cyan("Prioridade"),
+        chalk.cyan("Dependências"),
         chalk.cyan("Projeto"),
         chalk.cyan("Sprint"),
         chalk.cyan("Sincronizado"),
@@ -68,6 +70,12 @@ export const listTasks = async (options = { offline: false }): Promise<void> => 
       wordWrap: true,
       wrapOnWordBoundary: true,
     });
+
+    // Criar mapa para referência rápida das tarefas pelo ID
+    const tasksById = tasks.reduce((map, task) => {
+      map.set(task.id, task);
+      return map;
+    }, new Map<number, Task>());
 
     // Adicionar tarefas à tabela com cores
     tasks.forEach((task) => {
@@ -132,10 +140,18 @@ export const listTasks = async (options = { offline: false }): Promise<void> => 
           ? chalk.gray(`${issuePrefix}${issueTitle}`)
           : chalk.green(`${issuePrefix}${issueTitle}`);
 
+      // Formatar dependências
+      const dependenciesDisplay = formatDependencies(task.dependencies || [], tasksById);
+
+      // Formatar prioridade com cores
+      const priorityDisplay = getPriorityWithColor(task.priority || "");
+
       table.push([
         titleDisplay,
         getColoredStatus(task.status),
         githubStatus,
+        priorityDisplay,
+        dependenciesDisplay,
         projectName || "N/A",
         task.milestone || "N/A",
         syncSymbol,
@@ -175,4 +191,40 @@ const getColoredStatus = (status: string): string => {
     default:
       return status;
   }
+};
+
+// Função para colorir a prioridade
+const getPriorityWithColor = (priority: string): string => {
+  switch (priority.toLowerCase()) {
+    case "alta":
+      return chalk.red(priority);
+    case "média":
+    case "media":
+      return chalk.yellow(priority);
+    case "baixa":
+      return chalk.green(priority);
+    default:
+      return priority || "N/A";
+  }
+};
+
+// Função para formatar as dependências
+const formatDependencies = (dependencies: number[], tasksById: Map<number, Task>): string => {
+  if (!dependencies || dependencies.length === 0) {
+    return "N/A";
+  }
+
+  return dependencies
+    .map((depId) => {
+      const depTask = tasksById.get(depId);
+      if (!depTask) return `#${depId}`;
+
+      // Verificar o status da dependência
+      const isCompleted = ["done", "concluído", "concluido"].includes(depTask.status.toLowerCase());
+      const symbol = isCompleted ? "✓" : "⏳";
+      const color = isCompleted ? chalk.green : chalk.yellow;
+
+      return color(`${symbol} #${depId}`);
+    })
+    .join(", ");
 };

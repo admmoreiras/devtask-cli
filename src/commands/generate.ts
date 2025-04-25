@@ -73,6 +73,15 @@ export async function generateTasks() {
         console.log(`📌 Título: ${task.title}`);
         console.log(`📋 Projeto: ${task.project}`);
         console.log(`🏁 Milestone: ${task.milestone}`);
+        console.log(`🔺 Prioridade: ${task.priority}`);
+
+        // Exibir dependências
+        if (task.dependencies && task.dependencies.length > 0) {
+          console.log(`🔗 Dependências: ${task.dependencies.join(", ")}`);
+        } else {
+          console.log(`🔗 Dependências: Nenhuma`);
+        }
+
         console.log(`📝 Descrição: ${task.description.substring(0, 100)}${task.description.length > 100 ? "..." : ""}`);
       });
     }
@@ -106,25 +115,43 @@ async function saveTasks(tasks: TaskTemplate[]) {
 
   console.log(`Salvando ${tasks.length} tarefas no diretório: ${issuesDir}`);
 
-  const savePromises = tasks.map(async (task, index) => {
+  // Primeiro, criar um mapeamento de índices para IDs reais
+  const indexToIdMap = new Map<number, number>();
+
+  // Gerar IDs para todas as tarefas
+  const tasksWithIds = tasks.map((task, index) => {
+    const id = Date.now() + Math.floor(Math.random() * 1000) + index; // Garante IDs únicos mesmo se criados ao mesmo tempo
+    indexToIdMap.set(index + 1, id); // Mapear índice (começando em 1) para o ID real
+    return { ...task, id };
+  });
+
+  const savePromises = tasksWithIds.map(async (task, index) => {
     const slug = task.title
       .toLowerCase()
       .replace(/\s+/g, "-")
       .replace(/[^\w-]/g, "");
 
-    const id = Date.now() + Math.floor(Math.random() * 1000); // Garante IDs únicos mesmo se criados ao mesmo tempo
+    // Converter as dependências de índices para IDs reais
+    const realDependencies = task.dependencies
+      ? (task.dependencies.map((depIndex) => indexToIdMap.get(depIndex)).filter((id) => id !== undefined) as number[])
+      : [];
+
     const taskData = {
-      id,
+      id: task.id,
       title: task.title,
       description: task.description,
       milestone: task.milestone,
       project: task.project,
       status: task.status || "todo",
+      priority: task.priority || "média",
+      dependencies: realDependencies,
       lastSyncAt: new Date().toISOString(),
     };
 
-    const filePath = path.join(issuesDir, `${id}-${slug}.json`);
-    console.log(`Tarefa ${index + 1}: Salvando em ${filePath} com projeto: ${taskData.project}`);
+    const filePath = path.join(issuesDir, `${task.id}-${slug}.json`);
+    console.log(
+      `Tarefa ${index + 1}: Salvando em ${filePath} com projeto: ${taskData.project}, prioridade: ${taskData.priority}`
+    );
 
     await saveJson(filePath, taskData);
     return taskData;
