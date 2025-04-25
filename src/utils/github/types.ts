@@ -12,6 +12,14 @@ export interface Task {
   lastSyncAt?: string; // Data e hora da última sincronização com GitHub
   state?: string; // Estado da issue no GitHub (open/closed)
   deleted?: boolean; // Indica se a task foi marcada como excluída
+  comments?: TaskComment[]; // Comentários da tarefa
+}
+
+export interface TaskComment {
+  text: string;
+  date: string;
+  author: string;
+  type?: string; // Tipo de comentário (status-change, user, etc.)
 }
 
 export interface ProjectNode {

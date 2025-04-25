@@ -3,6 +3,13 @@ import Table from "cli-table3";
 import dotenv from "dotenv";
 import fs from "fs-extra";
 import * as path from "path";
+import {
+  formatDependencies,
+  formatProjectName,
+  getColoredStatus,
+  getGitHubStatus,
+  getPriorityWithColor,
+} from "../utils/display.js";
 import github from "../utils/github/index.js";
 import { Task } from "../utils/github/types.js";
 import { readAllFromDir } from "../utils/storage.js";
@@ -217,70 +224,62 @@ function displayNextSprint(milestone: MilestoneStatus): void {
 
   // Criar tabela
   const table = new Table({
-    head: [chalk.cyan("Título"), chalk.cyan("Status"), chalk.cyan("Status GitHub"), chalk.cyan("Projeto")],
+    head: [
+      chalk.cyan("ID"),
+      chalk.cyan("Título"),
+      chalk.cyan("Status"),
+      chalk.cyan("GitHub"),
+      chalk.cyan("Prior"),
+      chalk.cyan("Depend"),
+      chalk.cyan("Projeto"),
+      chalk.cyan("Sprint"),
+    ],
     wordWrap: true,
     wrapOnWordBoundary: true,
+    colWidths: [8, 35, 12, 10, 7, 12, 10, 15],
   });
+
+  // Criar mapa para referência rápida das tarefas pelo ID
+  const tasksById = sortedTasks.reduce((map, task) => {
+    map.set(task.id, task);
+    return map;
+  }, new Map<number, Task>());
 
   // Adicionar tarefas à tabela
   sortedTasks.forEach((task) => {
     const issueNumber = task.github_issue_number;
 
-    // Criar link para issue no GitHub, se tiver número
+    // Não criar mais link para o título, apenas exibir o texto normal
     let issueTitle = task.title;
-    let issuePrefix = "";
-
-    if (issueNumber) {
-      // Construir URL para a issue no GitHub
-      const githubUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/issues/${issueNumber}`;
-      // Criar texto com link utilizando formatação de terminal hyperlink
-      issuePrefix = `#${issueNumber} - `;
-      // O formato \u001b]8;;URL\u0007TEXT\u001b]8;;\u0007 cria um hyperlink no terminal
-      issueTitle = `\u001b]8;;${githubUrl}\u0007${task.title}\u001b]8;;\u0007`;
-    }
-
-    // Remover '@' do nome do projeto se existir
-    const projectName = task.project ? (task.project.startsWith("@") ? task.project.substring(1) : task.project) : "";
-
-    // Determinar o status do GitHub
-    let githubStatus = "N/A";
-    if (task.state) {
-      if (task.state === "deleted") {
-        githubStatus = chalk.red("Excluída");
-      } else {
-        githubStatus = task.state === "open" ? "Aberta" : "Fechada";
-      }
-    }
 
     // Destacar título em cinza para issues excluídas no GitHub
-    const titleDisplay =
-      task.state === "deleted" ? chalk.gray(`${issuePrefix}${issueTitle}`) : chalk.green(`${issuePrefix}${issueTitle}`);
+    const titleDisplay = task.state === "deleted" ? chalk.gray(issueTitle) : chalk.green(issueTitle);
 
-    table.push([titleDisplay, getColoredStatus(task.status), githubStatus, projectName || "N/A"]);
+    // Preparar ID com link caso tenha issue no GitHub
+    let taskIdDisplay = task.id ? `#${task.id}` : "N/A";
+    if (issueNumber) {
+      const githubUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/issues/${issueNumber}`;
+      taskIdDisplay = `\u001b]8;;${githubUrl}\u0007${taskIdDisplay}\u001b]8;;\u0007`;
+    } else if (!task.id && issueNumber) {
+      // Se não tiver ID mas tiver número de issue, usar número de issue
+      const githubUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/issues/${issueNumber}`;
+      taskIdDisplay = `\u001b]8;;${githubUrl}\u0007#${issueNumber}\u001b]8;;\u0007`;
+    }
+
+    table.push([
+      taskIdDisplay,
+      titleDisplay,
+      getColoredStatus(task.status),
+      getGitHubStatus(task.state),
+      getPriorityWithColor(task.priority),
+      formatDependencies(task.dependencies, tasksById),
+      formatProjectName(task.project),
+      task.milestone || milestone.name || "N/A",
+    ]);
   });
 
   console.log(table.toString());
-  console.log(chalk.blue("Os títulos das tarefas são clicáveis e abrem diretamente no GitHub"));
-}
-
-// Função para colorir o status
-function getColoredStatus(status: string = ""): string {
-  switch (status.toLowerCase()) {
-    case "todo":
-      return chalk.blue(status);
-    case "in progress":
-    case "em andamento":
-      return chalk.yellow(status);
-    case "done":
-    case "concluído":
-    case "concluido":
-      return chalk.green(status);
-    case "blocked":
-    case "bloqueado":
-      return chalk.red(status);
-    default:
-      return status || "todo";
-  }
+  console.log(chalk.blue("Os IDs das tarefas são clicáveis e abrem diretamente no GitHub"));
 }
 
 // Função para executar uma tarefa (será implementada posteriormente)

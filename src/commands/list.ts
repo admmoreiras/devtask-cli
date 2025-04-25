@@ -3,6 +3,14 @@ import Table from "cli-table3";
 import dotenv from "dotenv";
 import fs from "fs-extra";
 import * as path from "path";
+import {
+  formatDependencies,
+  formatProjectName,
+  getColoredStatus,
+  getGitHubStatus,
+  getPriorityWithColor,
+  getSyncStatus,
+} from "../utils/display.js";
 import { Task } from "../utils/github/types.js";
 
 // Carregar variáveis de ambiente
@@ -159,10 +167,8 @@ export const listTasks = async (options: ListOptions = { offline: false, compact
         taskIdDisplay = `\u001b]8;;${githubUrl}\u0007#${task.id}\u001b]8;;\u0007`;
       }
 
-      // Remover '@' do nome do projeto se existir e garantir N/A se vazio
-      const projectName = task.project ? (task.project.startsWith("@") ? task.project.substring(1) : task.project) : "";
-
       // Abreviar projeto se necessário
+      const projectName = formatProjectName(task.project);
       const shortenedProject = projectName.length > 8 ? projectName.substring(0, 7) + "…" : projectName;
 
       // Abreviar milestone/sprint
@@ -170,17 +176,14 @@ export const listTasks = async (options: ListOptions = { offline: false, compact
         task.milestone && task.milestone.length > 14 ? task.milestone.substring(0, 13) + "…" : task.milestone || "N/A";
 
       // Determinar o status do GitHub
-      let githubStatus = "N/A";
-      if (task.state) {
-        if (task.state === "deleted") {
-          githubStatus = chalk.red("Del");
-        } else {
-          githubStatus = task.state === "open" ? "Open" : "Closed";
-        }
+      let githubStatus = getGitHubStatus(task.state);
+      if (isCompactMode && githubStatus === "Excluída") {
+        githubStatus = chalk.red("Del");
       }
 
       // Determinar o status de sincronização
-      const syncStatus = task.synced ? chalk.green("✓") : chalk.red("✗");
+      const syncStatus = getSyncStatus(task);
+
       // Verificar modificação pelo timestamp de sincronização
       let modifiedSymbol = "";
 
@@ -208,20 +211,14 @@ export const listTasks = async (options: ListOptions = { offline: false, compact
       // Destacar título em cinza para issues excluídas no GitHub
       const titleDisplay = task.state === "deleted" ? chalk.gray(shortenedTitle) : chalk.green(shortenedTitle);
 
-      // Formatar dependências
-      const dependenciesDisplay = formatDependencies(task.dependencies || [], tasksById, isCompactMode);
-
-      // Formatar prioridade com cores
-      const priorityDisplay = getPriorityWithColor(task.priority || "", isCompactMode);
-
       // Adicionar linha à tabela com base no modo
       if (isCompactMode) {
         table.push([
           taskIdDisplay,
           titleDisplay,
           getColoredStatus(task.status, true),
-          priorityDisplay,
-          dependenciesDisplay,
+          getPriorityWithColor(task.priority, true),
+          formatDependencies(task.dependencies, tasksById, true),
           syncSymbol,
         ]);
       } else {
@@ -230,8 +227,8 @@ export const listTasks = async (options: ListOptions = { offline: false, compact
           titleDisplay,
           getColoredStatus(task.status),
           githubStatus,
-          priorityDisplay,
-          dependenciesDisplay,
+          getPriorityWithColor(task.priority),
+          formatDependencies(task.dependencies, tasksById),
           shortenedProject || "N/A",
           shortenedMilestone,
           syncSymbol,
@@ -254,106 +251,4 @@ export const listTasks = async (options: ListOptions = { offline: false, compact
   } catch (error) {
     console.error(chalk.red("Erro ao listar tarefas:"), error);
   }
-};
-
-// Função para colorir o status
-const getColoredStatus = (status: string, isCompact: boolean = false): string => {
-  let displayStatus = status;
-
-  // Versão abreviada para modo compacto
-  if (isCompact) {
-    switch (status.toLowerCase()) {
-      case "todo":
-        displayStatus = "TODO";
-        break;
-      case "in progress":
-        displayStatus = "PROG";
-        break;
-      case "em andamento":
-        displayStatus = "PROG";
-        break;
-      case "done":
-        displayStatus = "DONE";
-        break;
-      case "concluído":
-      case "concluido":
-        displayStatus = "DONE";
-        break;
-      case "blocked":
-      case "bloqueado":
-        displayStatus = "BLOCK";
-        break;
-    }
-  }
-
-  switch (status.toLowerCase()) {
-    case "todo":
-      return chalk.blue(displayStatus);
-    case "in progress":
-    case "em andamento":
-      return chalk.yellow(displayStatus);
-    case "done":
-    case "concluído":
-    case "concluido":
-      return chalk.green(displayStatus);
-    case "blocked":
-    case "bloqueado":
-      return chalk.red(displayStatus);
-    default:
-      return displayStatus;
-  }
-};
-
-// Função para colorir a prioridade
-const getPriorityWithColor = (priority: string, isCompact: boolean = false): string => {
-  let displayPriority = priority;
-
-  // Versão abreviada para modo compacto
-  if (isCompact) {
-    switch (priority.toLowerCase()) {
-      case "alta":
-        displayPriority = "ALT";
-        break;
-      case "média":
-      case "media":
-        displayPriority = "MED";
-        break;
-      case "baixa":
-        displayPriority = "BAX";
-        break;
-      default:
-        displayPriority = priority || "N/A";
-    }
-  }
-
-  switch (priority.toLowerCase()) {
-    case "alta":
-      return chalk.red(displayPriority);
-    case "média":
-    case "media":
-      return chalk.yellow(displayPriority);
-    case "baixa":
-      return chalk.green(displayPriority);
-    default:
-      return displayPriority || "N/A";
-  }
-};
-
-// Função para formatar as dependências
-const formatDependencies = (
-  dependencies: number[],
-  tasksById: Map<number, Task>,
-  isCompact: boolean = false
-): string => {
-  if (!dependencies || dependencies.length === 0) {
-    return "N/A";
-  }
-
-  // Mostrar todas as dependências como números, sem ícones
-  return dependencies
-    .map((depId) => {
-      // Usar apenas o ID sem ícones
-      return `${depId}`;
-    })
-    .join(", ");
 };

@@ -1,9 +1,18 @@
 import { Octokit } from "@octokit/rest";
 import chalk from "chalk";
+import Table from "cli-table3";
 import dotenv from "dotenv";
 import fs from "fs-extra";
 import inquirer from "inquirer";
 import path from "path";
+import {
+  formatDependencies,
+  formatProjectName,
+  getColoredStatus,
+  getGitHubStatus,
+  getPriorityWithColor,
+  getSyncStatus,
+} from "../utils/display.js";
 import github from "../utils/github/index.js";
 import { Task } from "../utils/github/types.js";
 import { nextTasks } from "./next.js";
@@ -97,9 +106,37 @@ export const executeTask = async (options = { issueNumber: 0, auto: false }): Pr
     const task: Task = await fs.readJSON(taskPath);
 
     console.log(chalk.green(`\n📋 Tarefa selecionada: #${task.github_issue_number} - ${task.title}`));
+
+    // Exibir detalhes da tarefa usando tabela similar à list.ts
+    displayTaskDetails(task);
+
     console.log(chalk.gray("Descrição:"));
     console.log(chalk.white(task.description || "Sem descrição"));
-    console.log(chalk.blue(`Status atual: ${task.status || "Não definido"}`));
+
+    // Mostrar comentários anteriores, se houver
+    if (task.comments && task.comments.length > 0) {
+      console.log(chalk.gray("\nComentários anteriores:"));
+      task.comments.forEach((comment, index) => {
+        console.log(chalk.white(`${index + 1}. ${comment.date}: ${comment.text}`));
+      });
+    }
+
+    // Determinar opções baseadas no status atual
+    const statusOptions = [];
+
+    if (task.status?.toLowerCase() !== "in progress") {
+      statusOptions.push({ name: "Iniciar trabalho (mudar para 'In Progress')", value: "start" });
+    }
+
+    if (task.status?.toLowerCase() !== "done") {
+      statusOptions.push({ name: "Marcar como concluída (mudar para 'Done')", value: "complete" });
+    }
+
+    if (task.status?.toLowerCase() !== "todo") {
+      statusOptions.push({ name: "Retornar para pendente (mudar para 'Todo')", value: "todo" });
+    }
+
+    statusOptions.push({ name: "Adicionar comentário", value: "comment" }, { name: "Cancelar", value: "cancel" });
 
     // Perguntar o que fazer com a tarefa
     const { action } = await inquirer.prompt([
@@ -107,13 +144,7 @@ export const executeTask = async (options = { issueNumber: 0, auto: false }): Pr
         type: "list",
         name: "action",
         message: "O que você deseja fazer com esta tarefa?",
-        choices: [
-          { name: "Iniciar trabalho (mudar para 'In Progress')", value: "start" },
-          { name: "Marcar como concluída (mudar para 'Done')", value: "complete" },
-          { name: "Retornar para pendente (mudar para 'Todo')", value: "todo" },
-          { name: "Adicionar comentário", value: "comment" },
-          { name: "Cancelar", value: "cancel" },
-        ],
+        choices: statusOptions,
       },
     ]);
 
@@ -136,6 +167,7 @@ export const executeTask = async (options = { issueNumber: 0, auto: false }): Pr
       ]);
 
       if (comment?.trim()) {
+        await addCommentToTask(task, comment);
         await addCommentToIssue(task.github_issue_number!, comment);
       }
 
@@ -154,12 +186,87 @@ export const executeTask = async (options = { issueNumber: 0, auto: false }): Pr
         },
       ]);
 
+      await addCommentToTask(task, comment);
       await addCommentToIssue(task.github_issue_number!, comment);
     }
   } catch (error) {
     console.error(chalk.red("❌ Erro ao executar tarefa:"), error);
   }
 };
+
+// Função para exibir detalhes da tarefa em formato de tabela
+function displayTaskDetails(task: Task): void {
+  const table = new Table({
+    head: [
+      chalk.cyan("ID"),
+      chalk.cyan("Status"),
+      chalk.cyan("GitHub"),
+      chalk.cyan("Prior"),
+      chalk.cyan("Depend"),
+      chalk.cyan("Projeto"),
+      chalk.cyan("Sprint"),
+      chalk.cyan("Sync"),
+    ],
+    colWidths: [10, 12, 10, 10, 12, 12, 16, 10],
+    style: { "padding-left": 1, "padding-right": 1 },
+  });
+
+  // Preparar ID com link caso tenha issue no GitHub
+  let taskIdDisplay = `#${task.id}`;
+  if (task.github_issue_number) {
+    const githubUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/issues/${task.github_issue_number}`;
+    taskIdDisplay = `\u001b]8;;${githubUrl}\u0007#${task.id}\u001b]8;;\u0007`;
+  }
+
+  // Adicionar linha à tabela
+  table.push([
+    taskIdDisplay,
+    getColoredStatus(task.status),
+    getGitHubStatus(task.state),
+    getPriorityWithColor(task.priority),
+    formatDependencies(task.dependencies),
+    formatProjectName(task.project),
+    task.milestone || "N/A",
+    getSyncStatus(task),
+  ]);
+
+  console.log(table.toString());
+
+  // Adicionar informação sobre links clicáveis
+  if (task.github_issue_number) {
+    console.log(chalk.blue("O ID da tarefa é clicável e abre diretamente no GitHub"));
+  }
+}
+
+// Função para adicionar comentário a uma tarefa localmente
+async function addCommentToTask(task: Task, comment: string): Promise<void> {
+  try {
+    console.log(chalk.blue(`Adicionando comentário à tarefa #${task.id}...`));
+
+    // Inicializar o array de comentários se não existir
+    if (!task.comments) {
+      task.comments = [];
+    }
+
+    // Adicionar novo comentário
+    task.comments.push({
+      text: comment,
+      date: new Date().toISOString(),
+      author: "local-user",
+    });
+
+    // Atualizar timestamp de sincronização
+    task.lastSyncAt = new Date().toISOString();
+
+    // Salvar tarefa local
+    const taskPath = path.join(".task", "issues", github.getTaskFilename(task));
+    await fs.writeJSON(taskPath, task, { spaces: 2 });
+
+    console.log(chalk.green("✅ Comentário adicionado localmente com sucesso!"));
+  } catch (error) {
+    console.error(chalk.red("❌ Erro ao adicionar comentário à tarefa local:"), error);
+  }
+}
 
 // Função para mudar o status de uma tarefa
 async function changeTaskStatus(task: Task, newStatus: string): Promise<void> {
@@ -177,6 +284,18 @@ async function changeTaskStatus(task: Task, newStatus: string): Promise<void> {
       // Se estava "done" e agora não está, reabrir
       task.state = "open";
     }
+
+    // Adicionar comentário de mudança de status
+    if (!task.comments) {
+      task.comments = [];
+    }
+
+    task.comments.push({
+      text: `Status alterado de "${oldStatus || "Não definido"}" para "${newStatus}"`,
+      date: new Date().toISOString(),
+      author: "system",
+      type: "status-change",
+    });
 
     // Atualizar timestamp de sincronização
     task.lastSyncAt = new Date().toISOString();
@@ -223,8 +342,8 @@ async function addCommentToIssue(issueNumber: number, comment: string): Promise<
       body: comment,
     });
 
-    console.log(chalk.green("✅ Comentário adicionado com sucesso!"));
+    console.log(chalk.green("✅ Comentário adicionado ao GitHub com sucesso!"));
   } catch (error) {
-    console.error(chalk.red("❌ Erro ao adicionar comentário:"), error);
+    console.error(chalk.red("❌ Erro ao adicionar comentário ao GitHub:"), error);
   }
 }
