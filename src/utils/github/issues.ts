@@ -57,6 +57,7 @@ export async function createGitHubIssue(task: Task): Promise<number | null> {
       body: taskBody,
       labels,
       milestone: milestoneId,
+      assignees: [GITHUB_OWNER],
     });
 
     if (!createIssueResponse || !createIssueResponse.data || !createIssueResponse.data.number) {
@@ -319,6 +320,7 @@ export async function updateGitHubIssue(task: Task): Promise<boolean> {
       issue_number: task.github_issue_number,
       title: task.title,
       body: taskBody,
+      assignees: [GITHUB_OWNER],
     };
 
     // Adicionar milestone se definido

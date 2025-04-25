@@ -210,16 +210,47 @@ export async function createProject(
 
     // Verificar se é usuário ou organização
     const isUserAccount = await isUser();
-    const projectOwnerType = isUserAccount ? "user" : "organization";
+
+    // Primeiro, obter o ID do owner (usuário ou organização)
+    let ownerId;
+    try {
+      const ownerQuery = isUserAccount
+        ? `query { user(login: "${GITHUB_OWNER}") { id } }`
+        : `query { organization(login: "${GITHUB_OWNER}") { id } }`;
+
+      const ownerResponse = await octokit.graphql<any>(ownerQuery);
+      ownerId = isUserAccount ? ownerResponse.user.id : ownerResponse.organization.id;
+
+      if (!silent) {
+        console.log(`✅ Obtido ID do ${isUserAccount ? "usuário" : "organização"}: ${ownerId}`);
+      }
+    } catch (error) {
+      console.error(`❌ Erro ao obter ID do ${isUserAccount ? "usuário" : "organização"}:`, error);
+      return null;
+    }
+
+    // Obter ID do repositório
+    let repoId = null;
+    try {
+      const repoQuery = `query { repository(owner: "${GITHUB_OWNER}", name: "${GITHUB_REPO}") { id } }`;
+      const repoResponse = await octokit.graphql<any>(repoQuery);
+      repoId = repoResponse.repository.id;
+
+      if (!silent) {
+        console.log(`✅ Obtido ID do repositório: ${repoId}`);
+      }
+    } catch (error) {
+      console.error("❌ Erro ao obter ID do repositório:", error);
+      // Continuar mesmo sem o ID do repositório
+    }
 
     // Criar novo projeto (API v2)
-    const mutation = `
+    const createProjectMutation = `
       mutation {
         createProjectV2(
           input: {
-            ownerId: "${isUserAccount ? `user(login: "${GITHUB_OWNER}")` : `organization(login: "${GITHUB_OWNER}")`}",
-            title: "${title}",
-            repositoryId: "${GITHUB_REPO}"
+            ownerId: "${ownerId}",
+            title: "${title}"
           }
         ) {
           projectV2 {
@@ -231,10 +262,36 @@ export async function createProject(
     `;
 
     try {
-      const response = await octokit.graphql<any>(mutation);
+      const response = await octokit.graphql<any>(createProjectMutation);
 
       if (!silent) {
         console.log(`✅ Projeto criado com sucesso: ${response.createProjectV2.projectV2.id}`);
+      }
+
+      // Se conseguimos o ID do repositório, tentar conectar o projeto ao repositório
+      if (repoId && response.createProjectV2.projectV2.id) {
+        const projectId = response.createProjectV2.projectV2.id;
+        try {
+          const linkToRepoMutation = `
+            mutation {
+              linkProjectV2ToRepository(input: {
+                projectId: "${projectId}",
+                repositoryId: "${repoId}"
+              }) {
+                repository {
+                  url
+                }
+              }
+            }
+          `;
+
+          await octokit.graphql<any>(linkToRepoMutation);
+          if (!silent) {
+            console.log(`✅ Projeto vinculado ao repositório com sucesso`);
+          }
+        } catch (linkError) {
+          console.error("⚠️ Projeto criado, mas não foi possível vinculá-lo ao repositório:", linkError);
+        }
       }
 
       return response.createProjectV2.projectV2.id;
@@ -247,17 +304,34 @@ export async function createProject(
 
       // Tentar com REST API (método alternativo para projetos V2)
       try {
-        const restResponse = await octokit.rest.projects.createForOrg({
-          org: GITHUB_OWNER,
-          name: title,
-          body: description,
-        });
+        // Se for organização
+        if (!isUserAccount) {
+          const restResponse = await octokit.rest.projects.createForOrg({
+            org: GITHUB_OWNER,
+            name: title,
+            body: description,
+          });
 
-        if (!silent) {
-          console.log(`✅ Projeto criado com sucesso via REST: ${restResponse.data.id}`);
+          if (!silent) {
+            console.log(`✅ Projeto criado com sucesso via REST: ${restResponse.data.id}`);
+          }
+
+          return String(restResponse.data.id);
         }
+        // Se for usuário
+        else {
+          const restResponse = await octokit.rest.projects.create({
+            owner: GITHUB_OWNER,
+            name: title,
+            body: description,
+          });
 
-        return String(restResponse.data.id);
+          if (!silent) {
+            console.log(`✅ Projeto criado com sucesso via REST: ${restResponse.data.id}`);
+          }
+
+          return String(restResponse.data.id);
+        }
       } catch (restError: any) {
         console.error("❌ Erro ao criar projeto via REST:", restError.message);
         return null;

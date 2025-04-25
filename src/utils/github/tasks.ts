@@ -23,14 +23,35 @@ export async function updateTaskWithGitHubInfo(task: Task, issueNumber: number):
   try {
     console.log(`\n🔄 Atualizando task #${task.id} com informações da issue #${issueNumber}...`);
 
+    // Antes de atualizar, encontrar e remover o arquivo original não sincronizado
+    const taskDir = path.join(process.cwd(), ".task/issues");
+    await fs.ensureDir(taskDir);
+
+    // Padrão do arquivo original: ID-titulo.json (sem o prefixo #)
+    const originalFilePattern = `${task.id}-`;
+    const files = await fs.readdir(taskDir);
+
+    // Encontrar o arquivo original para remover
+    for (const file of files) {
+      // Verifica se o arquivo começa com o ID (sem #) e NÃO tem número de issue
+      if (file.startsWith(originalFilePattern) && !file.includes("#")) {
+        const originalFilePath = path.join(taskDir, file);
+        try {
+          // Remover o arquivo original
+          await fs.remove(originalFilePath);
+          console.log(`🗑️ Arquivo original removido: ${file}`);
+        } catch (removeError) {
+          console.error(`⚠️ Erro ao remover arquivo original ${file}:`, removeError);
+        }
+      }
+    }
+
+    // Atualizar informações da task
     task.github_issue_number = issueNumber;
     task.synced = true;
     task.lastSyncAt = new Date().toISOString();
 
-    // Salvar a task atualizada
-    const taskDir = path.join(process.cwd(), ".task/issues");
-    await fs.ensureDir(taskDir);
-
+    // Salvar a task atualizada com o novo nome de arquivo
     const taskFile = path.join(taskDir, getTaskFilename(task));
     await fs.writeJSON(taskFile, task, { spaces: 2 });
 

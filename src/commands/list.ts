@@ -74,9 +74,26 @@ export const listTasks = async (options: ListOptions = { offline: false, compact
             chalk.cyan("Dep"),
             chalk.cyan("Sync"),
           ],
-          colWidths: [8, 40, 10, 6, 12, 5],
+          colWidths: [10, 38, 10, 6, 12, 5],
           truncate: "…",
           style: { "padding-left": 1, "padding-right": 1 },
+          chars: {
+            top: "─",
+            "top-mid": "┬",
+            "top-left": "┌",
+            "top-right": "┐",
+            bottom: "─",
+            "bottom-mid": "┴",
+            "bottom-left": "└",
+            "bottom-right": "┘",
+            left: "│",
+            "left-mid": "├",
+            mid: "─",
+            "mid-mid": "┼",
+            right: "│",
+            "right-mid": "┤",
+            middle: "│",
+          },
         }
       : {
           head: [
@@ -90,9 +107,26 @@ export const listTasks = async (options: ListOptions = { offline: false, compact
             chalk.cyan("Sprint"),
             chalk.cyan("Sync"),
           ],
-          colWidths: [8, 35, 12, 8, 7, 12, 10, 16, 5],
+          colWidths: [10, 35, 12, 8, 7, 12, 10, 16, 5],
           truncate: "…",
           style: { "padding-left": 1, "padding-right": 1 },
+          chars: {
+            top: "─",
+            "top-mid": "┬",
+            "top-left": "┌",
+            "top-right": "┐",
+            bottom: "─",
+            "bottom-mid": "┴",
+            "bottom-left": "└",
+            "bottom-right": "┘",
+            left: "│",
+            "left-mid": "├",
+            mid: "─",
+            "mid-mid": "┼",
+            right: "│",
+            "right-mid": "┤",
+            middle: "│",
+          },
         };
 
     // Preparar tabela para exibição
@@ -118,11 +152,11 @@ export const listTasks = async (options: ListOptions = { offline: false, compact
       const shortenedTitle =
         task.title.length > titleMaxLength ? task.title.substring(0, titleMaxLength - 1) + "…" : task.title;
 
-      // Adicionar link se necessário
-      let issueTitle = shortenedTitle;
+      // Preparar ID com link caso tenha issue no GitHub
+      let taskIdDisplay = `${task.id}`;
       if (issueNumber) {
         const githubUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/issues/${issueNumber}`;
-        issueTitle = `\u001b]8;;${githubUrl}\u0007${shortenedTitle}\u001b]8;;\u0007`;
+        taskIdDisplay = `\u001b]8;;${githubUrl}\u0007#${task.id}\u001b]8;;\u0007`;
       }
 
       // Remover '@' do nome do projeto se existir e garantir N/A se vazio
@@ -172,7 +206,7 @@ export const listTasks = async (options: ListOptions = { offline: false, compact
       const syncSymbol = `${syncStatus}${modifiedSymbol}`;
 
       // Destacar título em cinza para issues excluídas no GitHub
-      const titleDisplay = task.state === "deleted" ? chalk.gray(issueTitle) : chalk.green(issueTitle);
+      const titleDisplay = task.state === "deleted" ? chalk.gray(shortenedTitle) : chalk.green(shortenedTitle);
 
       // Formatar dependências
       const dependenciesDisplay = formatDependencies(task.dependencies || [], tasksById, isCompactMode);
@@ -183,7 +217,7 @@ export const listTasks = async (options: ListOptions = { offline: false, compact
       // Adicionar linha à tabela com base no modo
       if (isCompactMode) {
         table.push([
-          task.id,
+          taskIdDisplay,
           titleDisplay,
           getColoredStatus(task.status, true),
           priorityDisplay,
@@ -192,7 +226,7 @@ export const listTasks = async (options: ListOptions = { offline: false, compact
         ]);
       } else {
         table.push([
-          task.id,
+          taskIdDisplay,
           titleDisplay,
           getColoredStatus(task.status),
           githubStatus,
@@ -215,7 +249,7 @@ export const listTasks = async (options: ListOptions = { offline: false, compact
     console.log(`${chalk.yellow("!")} - Modificado localmente desde a última sincronização`);
     if (!isCompactMode) {
       console.log(`${chalk.red("Del")} - Issue removida do GitHub mas mantida localmente`);
-      console.log(chalk.blue("Os títulos das tarefas são clicáveis e abrem diretamente no GitHub"));
+      console.log(chalk.blue("Os IDs das tarefas são clicáveis e abrem diretamente no GitHub"));
     }
   } catch (error) {
     console.error(chalk.red("Erro ao listar tarefas:"), error);
