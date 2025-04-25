@@ -4,6 +4,22 @@ CLI para gerenciamento de tarefas de desenvolvimento com integração ao GitHub,
 
 ## Instalação
 
+### Opção 1: Instalação via NPM
+
+```bash
+# Instalar globalmente via NPM
+npm i devtask-cli
+
+# Executar usando NPX
+npx devtask [comando]
+
+# Exemplo:
+npx devtask list
+npx devtask execute -n 1
+```
+
+### Opção 2: Instalação a partir do repositório
+
 ```bash
 # Clonar o repositório
 git clone https://github.com/seu-usuario/devtask-cli.git
