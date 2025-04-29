@@ -24,7 +24,7 @@
   "author": "Adalberto Alves Moreira",
   "license": "MIT",
   "dependencies": {
-    "@octokit/rest": "^19.0.13",
+    "@octokit/rest": "^21.1.1",
     "axios": "^1.6.0",
     "chalk": "^5.3.0",
     "cli-table3": "^0.6.5",
@@ -44,7 +44,10 @@
     "@types/fs-extra": "^11.0.3",
     "@types/inquirer": "^9.0.6",
     "@types/node": "^20.8.9",
-    "tsx": "^3.14.0",
+    "tsx": "^4.19.4",
     "typescript": "^5.2.2"
+  },
+  "overrides": {
+    "@octokit/request-error": "^6.1.8"
   }
 }
